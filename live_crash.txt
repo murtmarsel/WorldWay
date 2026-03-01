@@ -1,0 +1,20 @@
+﻿--------- beginning of crash
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: FATAL EXCEPTION: main
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: Process: ru.acestar.vpn, PID: 3604
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: java.lang.RuntimeException: Unable to start service de.blinkt.openvpn.core.OpenVPNService@de90cc1 with Intent { xflg=0x4 cmp=ru.acestar.vpn/de.blinkt.openvpn.core.OpenVPNService (has extras) }: java.lang.NullPointerException: Attempt to invoke virtual method 'java.lang.Class de.blinkt.openvpn.core.ICSOpenVPNApplication.getMainClass()' on a null object reference
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.app.ActivityThread.handleServiceArgs(ActivityThread.java:6105)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.app.ActivityThread.-$$Nest$mhandleServiceArgs(Unknown Source:0)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.app.ActivityThread$H.handleMessage(ActivityThread.java:2974)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.os.Handler.dispatchMessage(Handler.java:110)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.os.Looper.loopOnce(Looper.java:273)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.os.Looper.loop(Looper.java:363)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.app.ActivityThread.main(ActivityThread.java:10060)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at java.lang.reflect.Method.invoke(Native Method)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at com.android.internal.os.RuntimeInit$MethodAndArgsCaller.run(RuntimeInit.java:632)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at com.android.internal.os.ZygoteInit.main(ZygoteInit.java:975)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: Caused by: java.lang.NullPointerException: Attempt to invoke virtual method 'java.lang.Class de.blinkt.openvpn.core.ICSOpenVPNApplication.getMainClass()' on a null object reference
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at de.blinkt.openvpn.core.OpenVPNService.getGraphPendingIntent(OpenVPNService.java:442)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at de.blinkt.openvpn.core.OpenVPNService.showNotification(OpenVPNService.java:285)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at de.blinkt.openvpn.core.OpenVPNService.onStartCommand(OpenVPNService.java:538)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	at android.app.ActivityThread.handleServiceArgs(ActivityThread.java:6087)
+03-01 13:16:33.541  3604  3604 E AndroidRuntime: 	... 9 more

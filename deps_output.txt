@@ -1,0 +1,18 @@
+﻿Starting a Gradle Daemon, 1 busy Daemon could not be reused, use --status for details
+.\gradlew.bat : 
+C:\Users\marse\AppData\Local\Temp\ps-script-d7a39552-61ee-4a5a-9df5-e2058144f334.ps1:82 знак:48
++ ... jects\VPN"; .\gradlew.bat :app:dependencies --configuration debugComp ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Gradle build daemon has been stopped: stop command received
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to get full insights.
+> Get more help at https://help.gradle.org.

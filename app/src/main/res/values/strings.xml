@@ -1,0 +1,36 @@
+<resources>
+    <string name="app_name">VPN</string>
+    
+    <!-- Main Screen -->
+    <string name="server_1">Сервер 1 (Россия)</string>
+    <string name="server_2">Сервер 2 (Германия)</string>
+    <string name="btn_connect">Подключиться</string>
+    <string name="btn_disconnect">Отключиться</string>
+    <string name="btn_select_config">Выбрать конфиг</string>
+    <string name="status_disconnected">Не подключено</string>
+    <string name="status_connecting">Подключение...</string>
+    <string name="status_connected">Подключено</string>
+    <string name="status_disconnecting">Отключение...</string>
+    <string name="status_error">Ошибка</string>
+    <string name="no_config_selected">Конфигурация не выбрана</string>
+    <string name="config_loaded">Конфигурация загружена</string>
+    <string name="subscription_expired">Подписка истекла</string>
+    <string name="subscription_active">Подписка активна до: %1$s</string>
+    
+    <!-- Auth -->
+    <string name="login">Войти</string>
+    <string name="register">Регистрация</string>
+    <string name="email">Email</string>
+    <string name="password">Пароль</string>
+    <string name="confirm_password">Подтвердите пароль</string>
+    <string name="username">Имя пользователя</string>
+    <string name="no_account">Нет аккаунта? Зарегистрируйтесь</string>
+    <string name="have_account">Есть аккаунт? Войдите</string>
+    <string name="logout">Выйти</string>
+    
+    <!-- Errors -->
+    <string name="error_empty_fields">Заполните все поля</string>
+    <string name="error_passwords_not_match">Пароли не совпадают</string>
+    <string name="error_invalid_email">Некорректный email</string>
+    <string name="error_password_short">Пароль должен быть не менее 6 символов</string>
+</resources>
