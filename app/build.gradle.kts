@@ -11,9 +11,10 @@ android {
     defaultConfig {
         applicationId = "ru.acestar.vpn"
         minSdk = 24
-        // Official ics-openvpn integration is stable with this target level.
-        // Newer target levels require changes inside library source (PendingIntent flags).
-        targetSdk = 33
+        // OpenVPN dependency crashes on Android 12+ when targetSdk >= 31 because
+        // of missing PendingIntent mutability flags in library internals.
+        // Keep targetSdk 30 until library dependency is updated/fixed.
+        targetSdk = 30
         versionCode = 1
         versionName = "1.0"
 

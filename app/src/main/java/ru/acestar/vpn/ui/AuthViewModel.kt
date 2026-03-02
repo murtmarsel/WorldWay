@@ -50,8 +50,8 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    fun register(username: String, email: String, password: String, confirmPassword: String) {
-        if (username.isBlank() || email.isBlank() || password.isBlank()) {
+    fun register(email: String, password: String, confirmPassword: String) {
+        if (email.isBlank() || password.isBlank()) {
             _authState.value = AuthState.Error("Заполните все поля")
             return
         }
@@ -74,7 +74,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             
-            val result = userRepository.register(email.trim(), password, username.trim())
+            val result = userRepository.register(email.trim(), password)
             result.fold(
                 onSuccess = { user ->
                     sessionManager.saveSession(user)

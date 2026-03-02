@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ovpn_pauseVPN">Пауза VPN</string>
+    <string name="ovpn_resumevpn">Продолжить VPN</string>
+    <string name="ovpn_cancel_connection">Отключить</string>
+    <string name="ovpn_state_userpause">VPN поставлен на паузу пользователем</string>
+    <string name="ovpn_state_screenoff">VPN на паузе - экран выключен</string>
+</resources>

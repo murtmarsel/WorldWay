@@ -6,7 +6,7 @@ import ru.acestar.vpn.data.model.User
 
 class UserRepository(private val userDao: UserDao) {
     
-    suspend fun register(email: String, password: String, username: String): Result<User> {
+    suspend fun register(email: String, password: String): Result<User> {
         val existingUser = userDao.getUserByEmail(email)
         if (existingUser != null) {
             return Result.failure(Exception("Пользователь с таким email уже существует"))
@@ -17,7 +17,7 @@ class UserRepository(private val userDao: UserDao) {
         val user = User(
             email = email,
             password = password,
-            username = username,
+            username = email.substringBefore("@").ifBlank { email },
             subscriptionEndDate = trialEndDate
         )
         

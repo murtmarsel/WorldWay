@@ -17,6 +17,7 @@ class LoginActivity : AppCompatActivity() {
     private val viewModel: AuthViewModel by viewModels()
     
     override fun onCreate(savedInstanceState: Bundle?) {
+        ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
         
         if (viewModel.isLoggedIn()) {

@@ -3,6 +3,7 @@ package ru.acestar.vpn.ui
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.text.format.Formatter
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,6 +11,7 @@ import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
@@ -25,6 +27,9 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private val viewModel: MainViewModel by viewModels()
+    private val trafficSamples = ArrayDeque<Float>()
+    private var lastTrafficBytes = 0L
+    private var lastTrafficTimestamp = 0L
 
     private val configFilePicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -33,6 +38,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
 
         if (!SessionManager.getInstance(this).isLoggedIn()) {
@@ -66,6 +72,14 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnConnect.setOnClickListener {
             handleConnectClick()
+        }
+
+        binding.btnPause.setOnClickListener {
+            viewModel.vpnManager.togglePause()
+        }
+
+        binding.btnSettings.setOnClickListener {
+            startActivity(Intent(this, SettingsActivity::class.java))
         }
 
         binding.btnLogout.setOnClickListener {
@@ -177,6 +191,24 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        lifecycleScope.launch {
+            combine(viewModel.byteCountIn, viewModel.byteCountOut) { inBytes, outBytes ->
+                inBytes to outBytes
+            }.collectLatest { (inBytes, outBytes) ->
+                updateTrafficUi(inBytes, outBytes)
+            }
+        }
+
+        lifecycleScope.launch {
+            viewModel.isPaused.collectLatest { isPaused ->
+                binding.btnPause.text = if (isPaused) {
+                    getString(R.string.btn_resume)
+                } else {
+                    getString(R.string.btn_pause)
+                }
+            }
+        }
     }
 
     private fun updateConnectionUI(state: VpnConnectionState) {
@@ -188,6 +220,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnConnect.text = getString(R.string.btn_connect)
                 binding.btnConnect.isEnabled = viewModel.hasActiveSubscription()
                 binding.btnSelectConfig.isEnabled = true
+                binding.btnPause.visibility = View.GONE
                 binding.loadingOverlay.visibility = View.GONE
             }
 
@@ -198,6 +231,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnConnect.text = getString(R.string.btn_disconnect)
                 binding.btnConnect.isEnabled = true
                 binding.btnSelectConfig.isEnabled = false
+                binding.btnPause.visibility = View.GONE
                 binding.loadingOverlay.visibility = View.GONE
             }
 
@@ -208,11 +242,13 @@ class MainActivity : AppCompatActivity() {
                 binding.btnConnect.text = getString(R.string.btn_disconnect)
                 binding.btnConnect.isEnabled = true
                 binding.btnSelectConfig.isEnabled = false
+                binding.btnPause.visibility = View.VISIBLE
                 binding.loadingOverlay.visibility = View.GONE
             }
 
             VpnConnectionState.DISCONNECTING -> {
                 binding.tvStatus.text = getString(R.string.status_disconnecting)
+                binding.btnPause.visibility = View.GONE
                 binding.loadingOverlay.visibility = View.VISIBLE
             }
 
@@ -223,8 +259,33 @@ class MainActivity : AppCompatActivity() {
                 binding.btnConnect.text = getString(R.string.btn_connect)
                 binding.btnConnect.isEnabled = viewModel.hasActiveSubscription()
                 binding.btnSelectConfig.isEnabled = true
+                binding.btnPause.visibility = View.GONE
                 binding.loadingOverlay.visibility = View.GONE
             }
         }
+    }
+
+    private fun updateTrafficUi(inBytes: Long, outBytes: Long) {
+        val now = System.currentTimeMillis()
+        val totalBytes = inBytes + outBytes
+
+        if (lastTrafficTimestamp > 0L) {
+            val deltaBytes = (totalBytes - lastTrafficBytes).coerceAtLeast(0L)
+            val deltaTimeMs = (now - lastTrafficTimestamp).coerceAtLeast(1L)
+            val speedBytesPerSec = deltaBytes * 1000f / deltaTimeMs
+
+            if (trafficSamples.size >= 30) {
+                trafficSamples.removeFirst()
+            }
+            trafficSamples.addLast(speedBytesPerSec)
+            binding.trafficChart.setPoints(trafficSamples.toList())
+        }
+
+        val inText = Formatter.formatShortFileSize(this, inBytes)
+        val outText = Formatter.formatShortFileSize(this, outBytes)
+        binding.tvTrafficCurrent.text = getString(R.string.traffic_format, inText, outText)
+
+        lastTrafficBytes = totalBytes
+        lastTrafficTimestamp = now
     }
 }

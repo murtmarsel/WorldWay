@@ -16,6 +16,8 @@
     <string name="config_loaded">Конфигурация загружена</string>
     <string name="subscription_expired">Подписка истекла</string>
     <string name="subscription_active">Подписка активна до: %1$s</string>
+    <string name="traffic_default">Трафик: ↓0 B / ↑0 B</string>
+    <string name="traffic_format">Трафик: ↓%1$s / ↑%2$s</string>
     
     <!-- Auth -->
     <string name="login">Войти</string>
@@ -27,6 +29,22 @@
     <string name="no_account">Нет аккаунта? Зарегистрируйтесь</string>
     <string name="have_account">Есть аккаунт? Войдите</string>
     <string name="logout">Выйти</string>
+    <string name="settings">Настройки</string>
+    <string name="theme_settings">Тема приложения</string>
+    <string name="theme_system">Системная</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Темная</string>
+    <string name="vpn_settings">Настройки VPN</string>
+    <string name="vpn_settings_hint">Управляйте VPN и системными параметрами подключения.</string>
+    <string name="open_system_vpn_settings">Открыть системные VPN-настройки</string>
+    <string name="protocol_settings">Протокол подключения</string>
+    <string name="protocol_auto">Авто (из конфига)</string>
+    <string name="protocol_udp">UDP</string>
+    <string name="protocol_tcp">TCP</string>
+    <string name="notifications_enabled_title">Уведомления</string>
+    <string name="notifications_enabled_hint">Если переключатель не совпадает с системным статусом, откроются системные настройки уведомлений приложения.</string>
+    <string name="btn_pause">Пауза</string>
+    <string name="btn_resume">Продолжить</string>
     
     <!-- Errors -->
     <string name="error_empty_fields">Заполните все поля</string>

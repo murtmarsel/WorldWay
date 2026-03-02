@@ -17,6 +17,7 @@ class RegisterActivity : AppCompatActivity() {
     private val viewModel: AuthViewModel by viewModels()
     
     override fun onCreate(savedInstanceState: Bundle?) {
+        ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
         
         binding = ActivityRegisterBinding.inflate(layoutInflater)
@@ -28,12 +29,11 @@ class RegisterActivity : AppCompatActivity() {
     
     private fun setupUI() {
         binding.btnRegister.setOnClickListener {
-            val username = binding.etUsername.text.toString()
             val email = binding.etEmail.text.toString()
             val password = binding.etPassword.text.toString()
             val confirmPassword = binding.etConfirmPassword.text.toString()
             
-            viewModel.register(username, email, password, confirmPassword)
+            viewModel.register(email, password, confirmPassword)
         }
         
         binding.tvLogin.setOnClickListener {

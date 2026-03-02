@@ -29,6 +29,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val connectionState: StateFlow<VpnConnectionState> = vpnManager.connectionState
     val statusMessage: StateFlow<String> = vpnManager.statusMessage
+    val byteCountIn: StateFlow<Long> = vpnManager.byteCountIn
+    val byteCountOut: StateFlow<Long> = vpnManager.byteCountOut
+    val isPaused: StateFlow<Boolean> = vpnManager.isPaused
 
     init {
         loadCurrentUser()

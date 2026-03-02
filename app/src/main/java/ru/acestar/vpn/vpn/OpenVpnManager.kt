@@ -20,6 +20,7 @@ import de.blinkt.openvpn.core.VpnStatus
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import ru.acestar.vpn.ui.VpnSettingsPreferences
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -38,6 +39,9 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
 
     private val _byteCountOut = MutableStateFlow(0L)
     val byteCountOut: StateFlow<Long> = _byteCountOut.asStateFlow()
+
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
 
     private var currentConfigContent: String? = null
     private var vpnProfile: VpnProfile? = null
@@ -102,8 +106,9 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     fun loadConfigFromInputStream(inputStream: InputStream, serverName: String): Boolean {
         return try {
             val reader = BufferedReader(InputStreamReader(inputStream))
-            currentConfigContent = reader.readText()
+            val originalConfig = reader.readText()
             reader.close()
+            currentConfigContent = applyProtocolOverride(originalConfig)
 
             val profile = parseConfig(currentConfigContent!!, serverName)
             Log.d(TAG, "Config loaded: $serverName, length: ${currentConfigContent?.length}, profile: ${profile != null}")
@@ -111,6 +116,23 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load config", e)
             false
+        }
+    }
+
+    private fun applyProtocolOverride(configContent: String): String {
+        return when (VpnSettingsPreferences.getProtocolMode(context)) {
+            VpnSettingsPreferences.PROTOCOL_UDP -> upsertProto(configContent, "udp")
+            VpnSettingsPreferences.PROTOCOL_TCP -> upsertProto(configContent, "tcp-client")
+            else -> configContent
+        }
+    }
+
+    private fun upsertProto(configContent: String, protocol: String): String {
+        val protoRegex = Regex("(?m)^\\s*proto\\s+\\S+\\s*$")
+        return if (protoRegex.containsMatchIn(configContent)) {
+            configContent.replace(protoRegex, "proto $protocol")
+        } else {
+            "proto $protocol\n$configContent"
         }
     }
 
@@ -175,6 +197,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
 
     fun disconnect() {
         try {
+            _isPaused.value = false
             _connectionState.value = VpnConnectionState.DISCONNECTING
             _statusMessage.value = "Отключение..."
 
@@ -194,6 +217,44 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     }
 
     fun isConnected(): Boolean = _connectionState.value == VpnConnectionState.CONNECTED
+
+    fun togglePause() {
+        if (_isPaused.value) {
+            resume()
+        } else {
+            pause()
+        }
+    }
+
+    fun pause() {
+        val service = mService ?: run {
+            _statusMessage.value = "Сервис VPN недоступен"
+            return
+        }
+        try {
+            service.userPause(true)
+            _isPaused.value = true
+            _statusMessage.value = "Пауза VPN"
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to pause VPN", e)
+            _statusMessage.value = "Не удалось поставить VPN на паузу"
+        }
+    }
+
+    fun resume() {
+        val service = mService ?: run {
+            _statusMessage.value = "Сервис VPN недоступен"
+            return
+        }
+        try {
+            service.userPause(false)
+            _isPaused.value = false
+            _statusMessage.value = "VPN возобновлен"
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to resume VPN", e)
+            _statusMessage.value = "Не удалось возобновить VPN"
+        }
+    }
 
     fun hasConfig(): Boolean = vpnProfile != null
 
@@ -223,6 +284,8 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         Log.d(TAG, "State: $state, level: $level, msg: $logmessage")
 
         _statusMessage.value = logmessage ?: state ?: ""
+        val upperState = state?.uppercase()
+        _isPaused.value = upperState == "USERPAUSE" || upperState == "SCREENOFF"
 
         when (level) {
             ConnectionStatus.LEVEL_CONNECTED -> {
@@ -238,6 +301,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
             ConnectionStatus.LEVEL_NOTCONNECTED -> {
                 _connectionState.value = VpnConnectionState.DISCONNECTED
                 _statusMessage.value = "Отключено"
+                _isPaused.value = false
             }
             ConnectionStatus.LEVEL_AUTH_FAILED -> {
                 _connectionState.value = VpnConnectionState.ERROR
