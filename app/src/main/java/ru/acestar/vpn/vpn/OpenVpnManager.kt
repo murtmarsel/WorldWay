@@ -43,6 +43,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     private val _isPaused = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
 
+    private var rawConfigContent: String? = null
     private var currentConfigContent: String? = null
     private var vpnProfile: VpnProfile? = null
     private var mService: IOpenVPNServiceInternal? = null
@@ -108,6 +109,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
             val reader = BufferedReader(InputStreamReader(inputStream))
             val originalConfig = reader.readText()
             reader.close()
+            rawConfigContent = originalConfig
             currentConfigContent = applyProtocolOverride(originalConfig)
 
             val profile = parseConfig(currentConfigContent!!, serverName)
@@ -115,6 +117,17 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
             profile != null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load config", e)
+            false
+        }
+    }
+
+    fun reloadCurrentConfigWithProtocol(serverName: String): Boolean {
+        val raw = rawConfigContent ?: return false
+        return try {
+            currentConfigContent = applyProtocolOverride(raw)
+            parseConfig(currentConfigContent!!, serverName) != null
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to reload config with protocol override", e)
             false
         }
     }

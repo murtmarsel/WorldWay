@@ -119,6 +119,27 @@
                     android:text="@string/have_account"
                     android:textColor="@color/primary" />
 
+                <TextView
+                    android:id="@+id/tvAgreementHint"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:text="@string/register_with_agreement"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvPrivacyPolicy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:layout_marginTop="8dp"
+                    android:padding="6dp"
+                    android:text="@string/open_privacy_policy_link"
+                    android:textColor="@color/primary"
+                    android:textStyle="bold" />
+
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

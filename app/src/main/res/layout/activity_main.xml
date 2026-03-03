@@ -8,6 +8,30 @@
     tools:context=".ui.MainActivity">
 
     <ImageButton
+        android:id="@+id/btnConfigList"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/config_list"
+        android:src="@android:drawable/ic_menu_agenda"
+        app:layout_constraintEnd_toStartOf="@id/btnAddConfig"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <ImageButton
+        android:id="@+id/btnAddConfig"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="8dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/add_config"
+        android:src="@android:drawable/ic_menu_add"
+        app:layout_constraintEnd_toStartOf="@id/btnSettings"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <ImageButton
         android:id="@+id/btnSettings"
         android:layout_width="40dp"
         android:layout_height="40dp"
@@ -103,25 +127,39 @@
     <ru.acestar.vpn.ui.TrafficChartView
         android:id="@+id/trafficChart"
         android:layout_width="0dp"
-        android:layout_height="80dp"
+        android:layout_height="120dp"
         android:layout_marginTop="8dp"
         android:layout_marginHorizontal="24dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/tvTrafficCurrent" />
 
-    <!-- Select Config Button -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/btnSelectConfig"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+    <LinearLayout
+        android:id="@+id/layoutServerButtons"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:text="@string/btn_select_config"
-        app:icon="@drawable/ic_folder"
+        android:layout_marginTop="14dp"
+        android:orientation="horizontal"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/trafficChart" />
+        app:layout_constraintTop_toBottomOf="@id/trafficChart">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnServer1"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/server_1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnServer2"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/server_2" />
+
+    </LinearLayout>
 
     <!-- Connect Button -->
     <com.google.android.material.button.MaterialButton

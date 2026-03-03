@@ -6,17 +6,20 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import ru.acestar.vpn.data.dao.ConnectionStatsDao
 import ru.acestar.vpn.data.dao.UserDao
+import ru.acestar.vpn.data.dao.VpnConfigDao
 import ru.acestar.vpn.data.model.ConnectionStats
 import ru.acestar.vpn.data.model.User
+import ru.acestar.vpn.data.model.VpnConfigEntity
 
 @Database(
-    entities = [User::class, ConnectionStats::class],
-    version = 1,
+    entities = [User::class, ConnectionStats::class, VpnConfigEntity::class],
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun connectionStatsDao(): ConnectionStatsDao
+    abstract fun vpnConfigDao(): VpnConfigDao
 
     companion object {
         @Volatile
@@ -28,7 +31,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "vpn_database"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

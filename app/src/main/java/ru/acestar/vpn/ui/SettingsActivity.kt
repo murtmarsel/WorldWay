@@ -5,12 +5,18 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.OnBackPressedCallback
 import ru.acestar.vpn.R
 import ru.acestar.vpn.databinding.ActivitySettingsBinding
 
 class SettingsActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_PROTOCOL_CHANGED = "protocol_changed"
+    }
+
     private lateinit var binding: ActivitySettingsBinding
+    private lateinit var initialProtocol: String
 
     override fun onCreate(savedInstanceState: Bundle?) {
         ThemePreferences.applyTheme(this)
@@ -23,8 +29,14 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     private fun setupUi() {
+        initialProtocol = VpnSettingsPreferences.getProtocolMode(this)
         binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
-        binding.toolbar.setNavigationOnClickListener { finish() }
+        binding.toolbar.setNavigationOnClickListener { finishWithResult() }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                finishWithResult()
+            }
+        })
 
         when (ThemePreferences.getThemeMode(this)) {
             ThemePreferences.THEME_LIGHT -> binding.rbThemeLight.isChecked = true
@@ -72,5 +84,26 @@ class SettingsActivity : AppCompatActivity() {
                 startActivity(intent)
             }
         }
+
+        binding.tvPrivacyPolicyFooter.setOnClickListener {
+            startActivity(LegalDocumentActivity.privacyIntent(this))
+        }
+
+        binding.tvSubscriptionManagement.setOnClickListener {
+            startActivity(Intent(this, SubscriptionActivity::class.java))
+        }
+
+        binding.btnSaveSettings.setOnClickListener {
+            finishWithResult()
+        }
+    }
+
+    private fun finishWithResult() {
+        val changed = initialProtocol != VpnSettingsPreferences.getProtocolMode(this)
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(EXTRA_PROTOCOL_CHANGED, changed)
+        )
+        finish()
     }
 }

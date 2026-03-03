@@ -5,4 +5,5 @@
     <string name="ovpn_cancel_connection">Отключить</string>
     <string name="ovpn_state_userpause">VPN поставлен на паузу пользователем</string>
     <string name="ovpn_state_screenoff">VPN на паузе - экран выключен</string>
+    <string name="ovpn_session_ipv6string">%1$s - %3$s %2$s</string>
 </resources>

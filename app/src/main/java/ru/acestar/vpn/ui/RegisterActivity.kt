@@ -4,17 +4,32 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import ru.acestar.vpn.R
 import ru.acestar.vpn.databinding.ActivityRegisterBinding
 
 class RegisterActivity : AppCompatActivity() {
     
     private lateinit var binding: ActivityRegisterBinding
     private val viewModel: AuthViewModel by viewModels()
+    private var pendingEmail: String = ""
+    private var pendingPassword: String = ""
+    private var pendingConfirmPassword: String = ""
+
+    private val agreementLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            viewModel.register(pendingEmail, pendingPassword, pendingConfirmPassword)
+        } else {
+            Toast.makeText(this, R.string.agreement_required, Toast.LENGTH_SHORT).show()
+        }
+    }
     
     override fun onCreate(savedInstanceState: Bundle?) {
         ThemePreferences.applyTheme(this)
@@ -29,15 +44,18 @@ class RegisterActivity : AppCompatActivity() {
     
     private fun setupUI() {
         binding.btnRegister.setOnClickListener {
-            val email = binding.etEmail.text.toString()
-            val password = binding.etPassword.text.toString()
-            val confirmPassword = binding.etConfirmPassword.text.toString()
-            
-            viewModel.register(email, password, confirmPassword)
+            pendingEmail = binding.etEmail.text.toString()
+            pendingPassword = binding.etPassword.text.toString()
+            pendingConfirmPassword = binding.etConfirmPassword.text.toString()
+            agreementLauncher.launch(LegalDocumentActivity.agreementIntent(this))
         }
         
         binding.tvLogin.setOnClickListener {
             finish()
+        }
+
+        binding.tvPrivacyPolicy.setOnClickListener {
+            startActivity(LegalDocumentActivity.privacyIntent(this))
         }
     }
     

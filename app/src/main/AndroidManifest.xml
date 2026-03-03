@@ -48,6 +48,21 @@
             android:exported="false"
             android:theme="@style/Theme.VPN.NoActionBar" />
 
+        <activity
+            android:name=".ui.LegalDocumentActivity"
+            android:exported="false"
+            android:theme="@style/Theme.VPN.NoActionBar" />
+
+        <activity
+            android:name=".ui.SubscriptionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.VPN.NoActionBar" />
+
+        <activity
+            android:name=".ui.ConfigSelectionActivity"
+            android:exported="false"
+            android:theme="@style/Theme.VPN.NoActionBar" />
+
         <!-- Library components: add android:exported required since targetSdk 31+ -->
         <activity
             android:name="de.blinkt.openvpn.LaunchVPN"

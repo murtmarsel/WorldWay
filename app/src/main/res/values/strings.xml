@@ -7,6 +7,17 @@
     <string name="btn_connect">Подключиться</string>
     <string name="btn_disconnect">Отключиться</string>
     <string name="btn_select_config">Выбрать конфиг</string>
+    <string name="add_config">Добавить конфиг</string>
+    <string name="config_list">Список конфигов</string>
+    <string name="no_saved_configs">Сохраненные конфигурации отсутствуют</string>
+    <string name="config_saved">Конфигурация сохранена</string>
+    <string name="protocol_applied_reconnecting">Протокол изменен, выполняется переподключение</string>
+    <string name="subscription_management">Управление подпиской</string>
+    <string name="subscription_stub">Раздел в разработке</string>
+    <string name="subscription_extend">Продлить подписку</string>
+    <string name="subscription_monthly">Тариф: ежемесячный</string>
+    <string name="subscription_yearly">Тариф: ежегодный</string>
+    <string name="save">Сохранить</string>
     <string name="status_disconnected">Не подключено</string>
     <string name="status_connecting">Подключение...</string>
     <string name="status_connected">Подключено</string>
@@ -45,6 +56,16 @@
     <string name="notifications_enabled_hint">Если переключатель не совпадает с системным статусом, откроются системные настройки уведомлений приложения.</string>
     <string name="btn_pause">Пауза</string>
     <string name="btn_resume">Продолжить</string>
+    <string name="user_agreement_title">Пользовательское соглашение</string>
+    <string name="privacy_policy_title">Политика конфиденциальности</string>
+    <string name="open_privacy_policy_link">Открыть Политику конфиденциальности</string>
+    <string name="scroll_to_end_to_accept">Прокрутите текст до конца, чтобы подтвердить согласие.</string>
+    <string name="agreement_read_complete">Текст прочитан. Теперь можно подтвердить согласие.</string>
+    <string name="accept_agreement_after_read">Принять соглашение</string>
+    <string name="register_with_agreement">Регистрируясь, вы принимаете Пользовательское соглашение</string>
+    <string name="settings_privacy_footer">В конце настроек: Политика конфиденциальности</string>
+    <string name="agreement_required">Для регистрации необходимо принять пользовательское соглашение</string>
+    <string name="close">Закрыть</string>
     
     <!-- Errors -->
     <string name="error_empty_fields">Заполните все поля</string>
