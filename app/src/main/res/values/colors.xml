@@ -22,4 +22,25 @@
     <color name="text_secondary">#757575</color>
     <color name="server_button">#E3F2FD</color>
     <color name="server_button_selected">#BBDEFB</color>
+
+
+
+
+    <color name="background_dark">#0A0E1A</color>
+    <color name="card_background_accent">#1E2A3A</color>
+    <color name="card_background_light">#2A3040</color>
+    <color name="divider">#2F3545</color>
+
+    <color name="accent_blue">#4A90E2</color>
+    <color name="accent_green">#2ECC71</color>
+    <color name="accent_purple">#9B59B6</color>
+    <color name="accent_yellow">#F1C40F</color>
+
+<!--    <color name="accent">#FF4081</color>-->
+    <color name="card_start">#FFFFFF</color>
+    <color name="card_end">#FAFAFA</color>
+<!--    <color name="divider">#E0E0E0</color>-->
+    <color name="success">#4CAF50</color>
+    <color name="warning">#FF9800</color>
+    <color name="info">#2196F3</color>
 </resources>

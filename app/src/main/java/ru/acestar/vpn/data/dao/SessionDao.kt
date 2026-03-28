@@ -1,0 +1,49 @@
+// data/database/SessionDao.kt
+package ru.acestar.vpn.data.database
+
+import androidx.room.*
+import kotlinx.coroutines.flow.Flow
+import ru.acestar.vpn.data.model.CurrentSession
+import ru.acestar.vpn.data.model.Session
+
+@Dao
+interface SessionDao {
+
+    // Сессии
+    @Query("SELECT * FROM sessions WHERE userId = :userId ORDER BY createdAt DESC")
+    fun getUserSessions(userId: Long): Flow<List<Session>>
+
+    @Query("SELECT * FROM sessions WHERE accessToken = :token AND isActive = 1")
+    suspend fun findSessionByToken(token: String): Session?
+
+    @Insert
+    suspend fun insertSession(session: Session): Long
+
+    @Update
+    suspend fun updateSession(session: Session)
+
+    @Query("UPDATE sessions SET isActive = 0 WHERE userId = :userId")
+    suspend fun deactivateAllUserSessions(userId: Long)
+
+    @Query("UPDATE sessions SET lastUsedAt = :timestamp WHERE id = :sessionId")
+    suspend fun updateSessionLastUsed(sessionId: Long, timestamp: Long)
+
+    @Query("DELETE FROM sessions WHERE tokenExpiry < :currentTime")
+    suspend fun deleteExpiredSessions(currentTime: Long)
+
+    // Текущая сессия
+    @Query("SELECT * FROM current_session LIMIT 1")
+    fun getCurrentSession(): Flow<CurrentSession?>
+
+    @Query("SELECT * FROM current_session LIMIT 1")
+    suspend fun getCurrentSessionSync(): CurrentSession?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveCurrentSession(session: CurrentSession)
+
+    @Query("DELETE FROM current_session")
+    suspend fun clearCurrentSession()
+
+    @Query("UPDATE current_session SET accessToken = :token, tokenExpiry = :expiry WHERE id = 1")
+    suspend fun updateCurrentToken(token: String, expiry: Long)
+}

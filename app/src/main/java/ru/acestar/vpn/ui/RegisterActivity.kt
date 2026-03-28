@@ -3,31 +3,81 @@ package ru.acestar.vpn.ui
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import java.util.Date
+import java.sql.Date as SqlDate
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
+import ru.acestar.vpn.VpnApplication
+import ru.acestar.vpn.api.AuthApiService
+import ru.acestar.vpn.data.model.AuthData
+import ru.acestar.vpn.data.repository.SessionManager
+import ru.acestar.vpn.data.repository.UserRepository
+import ru.acestar.vpn.utils.PasswordHasher
 import ru.acestar.vpn.databinding.ActivityRegisterBinding
 
 class RegisterActivity : AppCompatActivity() {
-    
+
     private lateinit var binding: ActivityRegisterBinding
+    private val authApiService = AuthApiService()
+    private val sessionManager by lazy { SessionManager.getInstance(this) }
+    private val userRepository by lazy {
+        UserRepository((application as VpnApplication).database.userDao())
+    }
     private val viewModel: AuthViewModel by viewModels()
     private var pendingEmail: String = ""
     private var pendingPassword: String = ""
     private var pendingConfirmPassword: String = ""
+    private var pendingCreateDate: Date = Date()
+    private var pendingTariff: String = "Free"
+    private var pendingIsNew: Boolean = true
+    private var registrationJob: Job? = null
+    private var registrationSucceeded: Boolean = false
+    private var registrationErrorMessage: String? = null
 
     private val agreementLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
-            viewModel.register(pendingEmail, pendingPassword, pendingConfirmPassword)
+            lifecycleScope.launch {
+                registrationJob?.join()
+                if (registrationSucceeded) {
+                    navigateToMain()
+                } else {
+                    showErrorDialog(registrationErrorMessage ?: "Ошибка регистрации")
+                }
+            }
         } else {
             Toast.makeText(this, R.string.agreement_required, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private val emailConfirmLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == RESULT_OK) {
+            registrationJob = lifecycleScope.launch {
+                registrationSucceeded = false
+                registrationErrorMessage = null
+                create_client(
+                    email = pendingEmail,
+                    password = pendingPassword,
+                    isConfirmed = false,
+                    createDate = pendingCreateDate,
+                    tariff = pendingTariff,
+                    isNew = pendingIsNew
+                )
+            }
+            agreementLauncher.launch(LegalDocumentActivity.agreementIntent(this))
+        } else {
+            Toast.makeText(this, R.string.emailConfirm_required, Toast.LENGTH_SHORT).show()
         }
     }
     
@@ -41,13 +91,108 @@ class RegisterActivity : AppCompatActivity() {
         setupUI()
         observeViewModel()
     }
-    
+
+    private fun email_manager(){
+        emailConfirmLauncher.launch(Intent(this, EmailConfirmationActivity::class.java).apply{
+            putExtra("email", pendingEmail)
+        })
+    }
+    private suspend fun create_client(
+        email: String,
+        password: String,
+        isConfirmed: Boolean,
+        createDate: Date,
+        tariff: String,
+        isNew: Boolean
+    ) {
+        try {
+            val result = authApiService.createUser(
+                email = email,
+                password = password,
+                isConfirmed = isConfirmed,
+                createDate = createDate as SqlDate,
+                tariff = tariff,
+                isNew = isNew
+            )
+
+            result.onSuccess { authData ->
+                val emailTrim = authData.email.ifBlank { email.trim() }
+                val passwordHash = PasswordHasher.hashForServer(password, emailTrim)
+                val user = userRepository.upsertAfterServerAuth(emailTrim, passwordHash, authData)
+
+                sessionManager.saveSession(
+                    user = user,
+                    accessToken = authData.token,
+                    email = emailTrim
+                )
+
+                // Если сервер не прислал токен в ответе (т.к. он уже действителен),
+                // берём актуальный токен из БД.
+                val tokenForConfirm = sessionManager.getAccessToken()
+                tokenForConfirm?.let { authApiService.setAuthToken(it) }
+
+                val confirmResult = authApiService.confirmEmail(
+                    email = emailTrim,
+                    isConfirmed = true
+                )
+                confirmResult.fold(
+                    onSuccess = {
+                        registrationSucceeded = true
+                    },
+                    onFailure = { exception ->
+                        registrationSucceeded = false
+                        registrationErrorMessage = "Ошибка подтверждения email: ${exception.message}"
+                    }
+                )
+            }.onFailure { exception ->
+                registrationSucceeded = false
+                registrationErrorMessage = "Ошибка регистрации: ${exception.message}"
+            }
+        } catch (e: Exception) {
+            registrationSucceeded = false
+            registrationErrorMessage = "Ошибка: ${e.message}"
+        }
+    }
+
+    private fun confirmEmail(
+        email: String,
+        isConfirmed: Boolean) {
+        lifecycleScope.launch {
+            try {
+                val result = authApiService.confirmEmail(
+                    email = email,
+                    isConfirmed = isConfirmed
+                )
+
+                result.onSuccess { authData ->
+
+                }.onFailure { exception ->
+                    showErrorDialog("Ошибка подтверждения email: ${exception.message}")
+                }
+            } catch (e: Exception) {
+                showErrorDialog("Ошибка: ${e.message}")
+            }
+        }
+    }
     private fun setupUI() {
         binding.btnRegister.setOnClickListener {
+            val utilDate = Date()
+            val sqlDate = SqlDate(utilDate.time)
             pendingEmail = binding.etEmail.text.toString()
             pendingPassword = binding.etPassword.text.toString()
             pendingConfirmPassword = binding.etConfirmPassword.text.toString()
-            agreementLauncher.launch(LegalDocumentActivity.agreementIntent(this))
+            pendingCreateDate = sqlDate
+
+
+            var check = viewModel.fields_check(pendingEmail, pendingPassword, pendingConfirmPassword)
+            if(check) {
+                email_manager()
+
+            }
+
+
+
+
         }
         
         binding.tvLogin.setOnClickListener {
@@ -91,5 +236,12 @@ class RegisterActivity : AppCompatActivity() {
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(intent)
         finish()
+    }
+    private fun showErrorDialog(message: String) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Ошибка")
+            .setMessage(message)
+            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+            .show()
     }
 }

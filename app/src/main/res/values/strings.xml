@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">VPN</string>
+    <string name="app_name">WorldWay</string>
     
     <!-- Main Screen -->
     <string name="server_1">Сервер 1 (Россия)</string>
@@ -29,6 +29,7 @@
     <string name="subscription_active">Подписка активна до: %1$s</string>
     <string name="traffic_default">Трафик: ↓0 B / ↑0 B</string>
     <string name="traffic_format">Трафик: ↓%1$s / ↑%2$s</string>
+    <string name="base_url">http://94.249.239.35:5001</string>
     
     <!-- Auth -->
     <string name="login">Войти</string>
@@ -46,30 +47,140 @@
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Темная</string>
     <string name="vpn_settings">Настройки VPN</string>
-    <string name="vpn_settings_hint">Управляйте VPN и системными параметрами подключения.</string>
-    <string name="open_system_vpn_settings">Открыть системные VPN-настройки</string>
+    <string name="vpn_settings_hint">Управление системными параметрами подключения.</string>
+    <string name="open_system_vpn_settings">Cистемные VPN-настройки</string>
     <string name="protocol_settings">Протокол подключения</string>
-    <string name="protocol_auto">Авто (из конфига)</string>
+    <string name="protocol_auto">Авто</string>
     <string name="protocol_udp">UDP</string>
     <string name="protocol_tcp">TCP</string>
     <string name="notifications_enabled_title">Уведомления</string>
     <string name="notifications_enabled_hint">Если переключатель не совпадает с системным статусом, откроются системные настройки уведомлений приложения.</string>
+    <string name="notifications_block_title">Уведомления</string>
+    <string name="toast_notifications_title">Toast-уведомления</string>
+    <string name="toast_notifications_hint">Показывать всплывающие сообщения внутри приложения.</string>
+    <string name="system_notifications_settings">Системные уведомления</string>
     <string name="btn_pause">Пауза</string>
     <string name="btn_resume">Продолжить</string>
     <string name="user_agreement_title">Пользовательское соглашение</string>
     <string name="privacy_policy_title">Политика конфиденциальности</string>
-    <string name="open_privacy_policy_link">Открыть Политику конфиденциальности</string>
+    <string name="open_privacy_policy_link">Политика конфиденциальности</string>
     <string name="scroll_to_end_to_accept">Прокрутите текст до конца, чтобы подтвердить согласие.</string>
-    <string name="agreement_read_complete">Текст прочитан. Теперь можно подтвердить согласие.</string>
+    <string name="agreement_read_complete">Теперь можно подтвердить согласие.</string>
     <string name="accept_agreement_after_read">Принять соглашение</string>
     <string name="register_with_agreement">Регистрируясь, вы принимаете Пользовательское соглашение</string>
-    <string name="settings_privacy_footer">В конце настроек: Политика конфиденциальности</string>
-    <string name="agreement_required">Для регистрации необходимо принять пользовательское соглашение</string>
+    <string name="agreement_required">Необходимо принять пользовательское соглашение</string>
+    <string name="emailConfirm_required">Необходимо подтвердить email</string>
     <string name="close">Закрыть</string>
-    
+    <string name="delete">Удалить</string>
+    <string name="delete_config_title">Удаление конфигурации</string>
+    <string name="delete_config_message">Удалить конфигурацию \"%1$s\"?</string>
+    <string name="delete_active_config_message">Удалить активную конфигурацию \"%1$s\"? Подключение будет сброшено.</string>
+    <string name="server_info_with_protocol">Сервер: %1$s:%2$s (%3$s)</string>
+    <string name="favorite">Избранное</string>
+    <string name="active_config_label">Текущая конфигурация</string>
+    <string name="favorite_limit_reached">Можно добавить не более 10 избранных конфигураций</string>
+
+    <!-- Подписки   -->
+
+
+    <!-- Заголовки -->
+    <string name="choose_subscription">Выберите подписку</string>
+    <string name="unlock_all_features">Разблокируйте все возможности</string>
+
+    <!-- Суточная подписка -->
+    <string name="daily_subscription">Суточная</string>
+    <string name="one_day_access">Доступ на 24 часа</string>
+    <string name="daily_price">49 ₽</string>
+    <string name="get_daily">Попробовать на сутки</string>
+
+    <!-- Месячная подписка -->
+    <string name="monthly_subscription">Месячная</string>
+    <string name="popular_choice">🔥 Выбор большинства</string>
+    <string name="monthly_price_old">499 ₽</string>
+    <string name="monthly_price">349 ₽</string>
+    <string name="monthly_discount">⚡ Скидка 30%</string>
+    <string name="monthly_save">Экономия 150 ₽ в месяц</string>
+    <string name="get_monthly">Оформить месяц</string>
+
+    <!-- Годовая подписка -->
+    <string name="yearly_subscription">Годовая</string>
+    <string name="best_value">💰 Лучшая цена</string>
+    <string name="yearly_price_old">5 990 ₽</string>
+    <string name="yearly_price">2 990 ₽</string>
+    <string name="yearly_discount">🔥 Скидка 50%</string>
+    <string name="yearly_save">Экономия 3 000 ₽ в год</string>
+    <string name="get_yearly">Оформить год</string>
+
+    <!-- Рекламный блок -->
+    <string name="or_watch_ad">ИЛИ</string>
+    <string name="watch_ad_for_access">Посмотрите рекламу</string>
+    <string name="get_30_minutes">и получите 30 минут бесплатного доступа</string>
+    <string name="watch_ad_button">Смотреть рекламу</string>
+    <string name="limited_time_offer">Предложение действует раз в 24 часа</string>
+
+    <!-- Преимущества -->
+    <string name="all_subscriptions_include">Все подписки включают:</string>
+    <string name="no_logs">Без сохранения логов</string>
+    <string name="unlimited_speed">Безлимитная скорость</string>
+    <string name="all_servers">Все серверы мира</string>
+    <string name="no_ads">Без рекламы</string>
+    <string name="multi_device">5 устройств</string>
+    <string name="support">Поддержка 24/7</string>
+
+    <!-- Юридические ссылки -->
+    <string name="subscription_terms">Подписка автоматически продлевается. Отменить можно в любой момент в настройках аккаунта.</string>
+    <string name="restore_purchases">Восст. покупки</string>
+    <string name="privacy_policy">Политика</string>
+    <string name="terms_of_service">Условия</string>
     <!-- Errors -->
     <string name="error_empty_fields">Заполните все поля</string>
     <string name="error_passwords_not_match">Пароли не совпадают</string>
     <string name="error_invalid_email">Некорректный email</string>
     <string name="error_password_short">Пароль должен быть не менее 6 символов</string>
+
+    <!-- Главный экран: напоминания -->
+    <string name="banner_email_unconfirmed">Подтвердите email — проверьте почту и перейдите по ссылке.</string>
+    <string name="banner_confirm_email">К почте</string>
+    <string name="banner_subscription_expiring">Оформите или продлите подписку для полного доступа.</string>
+    <string name="banner_subscription_expires_soon">Подписка скоро истекает. Продлите, чтобы не потерять доступ.</string>
+    <string name="banner_close">✕</string>
+    <string name="admin_empty">Нет данных</string>
+    <string name="first_payment_discount_hint">🎁 Скидка 20% на первую оплату (новый аккаунт)</string>
+
+    <!-- Admin Panel -->
+    <string name="admin_panel">Панель администратора</string>
+    <string name="admin_access_title">Доступ к панели администрирования</string>
+    <string name="admin_password_hint">Пароль администратора</string>
+    <string name="admin_enter">Войти</string>
+    <string name="admin_stats_title">Статистика системы</string>
+    <string name="admin_search_hint">Поиск по email или ID</string>
+    <string name="admin_tab_users">Пользователи</string>
+    <string name="admin_tab_configs">Конфигурации</string>
+    <string name="admin_tab_logs">Логи</string>
+    <string name="admin_users_hint">Нажмите на карточку для управления пользователем</string>
+    <string name="admin_configs_title">Конфигурационные файлы</string>
+    <string name="admin_user_id_hint">ID пользователя</string>
+    <string name="admin_load">Загрузить</string>
+    <string name="admin_logs_title">Системные логи</string>
+    <string name="admin_clear_logs">Очистить логи</string>
+    <string name="admin_user_details">Информация о пользователе</string>
+    <string name="admin_actions">Действия</string>
+    <string name="admin_configs">Конфигурации</string>
+    <string name="admin_stats">Статистика</string>
+    <string name="admin_payments">Платежи</string>
+    <string name="admin_logs">Логи</string>
+    <string name="admin_edit">Редактировать</string>
+    <string name="admin_reset_password">Сброс пароля</string>
+    <string name="admin_subscription">Подписка</string>
+    <string name="admin_delete">Удалить</string>
+    <string name="admin_email_hint">Email</string>
+    <string name="admin_tariff_hint">Тариф</string>
+    <string name="admin_email_confirmed">Email подтвержден</string>
+    <string name="admin_active">Активен</string>
+    <string name="admin_payments_title">История платежей</string>
+
+    <string name="logout_title">Выход из системы</string>
+    <string name="logout_confirm">Вы уверены, что хотите выйти из системы?</string>
+    <string name="logout_yes">Да, выйти</string>
+    <string name="logout_no">Нет</string>
 </resources>

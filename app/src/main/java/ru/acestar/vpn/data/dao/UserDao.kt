@@ -27,6 +27,9 @@ interface UserDao {
     @Query("SELECT * FROM users WHERE id = :id")
     fun observeUser(id: Long): Flow<User?>
 
-    @Query("UPDATE users SET subscriptionEndDate = :endDate WHERE id = :userId")
-    suspend fun updateSubscription(userId: Long, endDate: Long)
+    @Query("UPDATE users SET subsEndDate = :endDate WHERE id = :userId")
+    suspend fun updateSubscription(userId: Long, endDate: Long?)
+
+    @Query("UPDATE users SET isNew = :value WHERE id = :userId")
+    suspend fun setIsNewUser(userId: Long, value: Boolean)
 }

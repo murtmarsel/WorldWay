@@ -17,9 +17,15 @@ import de.blinkt.openvpn.core.OpenVPNService
 import de.blinkt.openvpn.core.ProfileManager
 import de.blinkt.openvpn.core.VPNLaunchHelper
 import de.blinkt.openvpn.core.VpnStatus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import ru.acestar.vpn.ui.VpnSettingsPreferences
 import java.io.BufferedReader
 import java.io.InputStream
@@ -27,6 +33,9 @@ import java.io.InputStreamReader
 import java.io.StringReader
 
 class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, VpnStatus.ByteCountListener {
+    private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var forceDisconnectJob: Job? = null
+    private val runtimePrefs = context.getSharedPreferences("vpn_runtime_state", Context.MODE_PRIVATE)
 
     private val _connectionState = MutableStateFlow(VpnConnectionState.DISCONNECTED)
     val connectionState: StateFlow<VpnConnectionState> = _connectionState.asStateFlow()
@@ -52,6 +61,9 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     companion object {
         private const val TAG = "OpenVpnManager"
         const val VPN_PERMISSION_REQUEST_CODE = 1001
+        private const val KEY_LAST_STATE = "last_state"
+        private const val KEY_LAST_STATUS = "last_status"
+        private const val KEY_LAST_TS = "last_ts"
 
         @Volatile
         private var INSTANCE: OpenVpnManager? = null
@@ -69,6 +81,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             mService = IOpenVPNServiceInternal.Stub.asInterface(service)
             Log.d(TAG, "OpenVPN service connected")
+            ensureLoadedStateOnResume()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -80,6 +93,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     init {
         VpnStatus.addStateListener(this)
         VpnStatus.addByteCountListener(this)
+        restoreRuntimeState()
     }
 
     fun bindService(context: Context) {
@@ -89,6 +103,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
             intent.action = OpenVPNService.START_SERVICE
             context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
             isBound = true
+            ensureLoadedStateOnResume()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to bind service", e)
         }
@@ -213,19 +228,35 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
             _isPaused.value = false
             _connectionState.value = VpnConnectionState.DISCONNECTING
             _statusMessage.value = "Отключение..."
+            persistRuntimeState()
 
             ProfileManager.setConntectedVpnProfileDisconnected(context)
 
             if (mService != null) {
                 try {
                     mService?.stopVPN(false)
+                    forceDisconnectJob?.cancel()
+                    forceDisconnectJob = managerScope.launch {
+                        delay(6000L)
+                        if (_connectionState.value == VpnConnectionState.DISCONNECTING) {
+                            _connectionState.value = VpnConnectionState.DISCONNECTED
+                            _statusMessage.value = "Отключено"
+                            persistRuntimeState()
+                        }
+                    }
                 } catch (e: RemoteException) {
                     Log.e(TAG, "Error stopping VPN via service", e)
                 }
+            } else {
+                _connectionState.value = VpnConnectionState.DISCONNECTED
+                _statusMessage.value = "Отключено"
+                persistRuntimeState()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to disconnect", e)
             _connectionState.value = VpnConnectionState.DISCONNECTED
+            _statusMessage.value = "Отключено"
+            persistRuntimeState()
         }
     }
 
@@ -287,6 +318,21 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         return Pair(host, port)
     }
 
+    fun getCurrentProtocolLabel(): String {
+        val config = currentConfigContent ?: return "AUTO"
+        config.lines().forEach { line ->
+            val trimmed = line.trim().lowercase()
+            if (trimmed.startsWith("proto ")) {
+                return when {
+                    trimmed.contains("tcp") -> "TCP"
+                    trimmed.contains("udp") -> "UDP"
+                    else -> "AUTO"
+                }
+            }
+        }
+        return "AUTO"
+    }
+
     override fun updateState(
         state: String?,
         logmessage: String?,
@@ -302,27 +348,34 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
 
         when (level) {
             ConnectionStatus.LEVEL_CONNECTED -> {
+                forceDisconnectJob?.cancel()
                 _connectionState.value = VpnConnectionState.CONNECTED
                 _statusMessage.value = "Подключено"
+                persistRuntimeState()
             }
             ConnectionStatus.LEVEL_CONNECTING_SERVER_REPLIED,
             ConnectionStatus.LEVEL_CONNECTING_NO_SERVER_REPLY_YET,
             ConnectionStatus.LEVEL_START,
             ConnectionStatus.LEVEL_WAITING_FOR_USER_INPUT -> {
                 _connectionState.value = VpnConnectionState.CONNECTING
+                persistRuntimeState()
             }
             ConnectionStatus.LEVEL_NOTCONNECTED -> {
+                forceDisconnectJob?.cancel()
                 _connectionState.value = VpnConnectionState.DISCONNECTED
                 _statusMessage.value = "Отключено"
                 _isPaused.value = false
+                persistRuntimeState()
             }
             ConnectionStatus.LEVEL_AUTH_FAILED -> {
                 _connectionState.value = VpnConnectionState.ERROR
                 _statusMessage.value = "Ошибка авторизации"
+                persistRuntimeState()
             }
             ConnectionStatus.LEVEL_NONETWORK -> {
                 _connectionState.value = VpnConnectionState.ERROR
                 _statusMessage.value = "Нет сети"
+                persistRuntimeState()
             }
             else -> {}
         }
@@ -338,5 +391,58 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     fun cleanup() {
         VpnStatus.removeStateListener(this)
         VpnStatus.removeByteCountListener(this)
+    }
+
+    private fun normalizeDisconnectingStateIfNeeded() {
+        if (_connectionState.value == VpnConnectionState.DISCONNECTING && mService == null) {
+            _connectionState.value = VpnConnectionState.DISCONNECTED
+            _statusMessage.value = "Отключено"
+            persistRuntimeState()
+        }
+    }
+
+    fun ensureLoadedStateOnResume() {
+        normalizeDisconnectingStateIfNeeded()
+        if (_connectionState.value == VpnConnectionState.DISCONNECTED && mService != null) {
+            val lastState = runtimePrefs.getString(KEY_LAST_STATE, null)
+            if (lastState == VpnConnectionState.CONNECTED.name) {
+                _connectionState.value = VpnConnectionState.CONNECTED
+                _statusMessage.value = "Подключено"
+            }
+        }
+    }
+
+    private fun restoreRuntimeState() {
+        val lastStateName = runtimePrefs.getString(KEY_LAST_STATE, null) ?: return
+        val lastStatus = runtimePrefs.getString(KEY_LAST_STATUS, "") ?: ""
+        val lastTs = runtimePrefs.getLong(KEY_LAST_TS, 0L)
+        val restoredState = runCatching { VpnConnectionState.valueOf(lastStateName) }
+            .getOrDefault(VpnConnectionState.DISCONNECTED)
+        val normalizedState = if (
+            restoredState == VpnConnectionState.DISCONNECTING &&
+            System.currentTimeMillis() - lastTs > 10_000L
+        ) {
+            VpnConnectionState.DISCONNECTED
+        } else {
+            restoredState
+        }
+        _connectionState.value = normalizedState
+        _statusMessage.value = if (normalizedState == VpnConnectionState.DISCONNECTED) "Отключено" else lastStatus
+    }
+
+    private fun persistRuntimeState() {
+        runtimePrefs.edit()
+            .putString(KEY_LAST_STATE, _connectionState.value.name)
+            .putString(KEY_LAST_STATUS, _statusMessage.value)
+            .putLong(KEY_LAST_TS, System.currentTimeMillis())
+            .apply()
+    }
+
+    fun resetUiStateToDisconnected() {
+        forceDisconnectJob?.cancel()
+        _connectionState.value = VpnConnectionState.DISCONNECTED
+        _statusMessage.value = "Отключено"
+        _isPaused.value = false
+        persistRuntimeState()
     }
 }

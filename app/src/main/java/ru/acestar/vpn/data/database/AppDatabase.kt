@@ -10,14 +10,17 @@ import ru.acestar.vpn.data.dao.VpnConfigDao
 import ru.acestar.vpn.data.model.ConnectionStats
 import ru.acestar.vpn.data.model.User
 import ru.acestar.vpn.data.model.VpnConfigEntity
+import ru.acestar.vpn.data.model.Session
+import ru.acestar.vpn.data.model.CurrentSession
 
 @Database(
-    entities = [User::class, ConnectionStats::class, VpnConfigEntity::class],
-    version = 2,
+    entities = [User::class, ConnectionStats::class, VpnConfigEntity::class, Session::class, CurrentSession::class],
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
+    abstract fun sessionDao(): SessionDao
     abstract fun connectionStatsDao(): ConnectionStatsDao
     abstract fun vpnConfigDao(): VpnConfigDao
 
@@ -31,9 +34,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "vpn_database"
-                )
-                    .fallbackToDestructiveMigration()
-                    .build()
+                ).build()
                 INSTANCE = instance
                 instance
             }

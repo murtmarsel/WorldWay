@@ -4,7 +4,9 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+
 android {
+
     namespace = "ru.acestar.vpn"
     compileSdk = 36
 
@@ -34,6 +36,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -48,16 +51,30 @@ android {
     }
 }
 
+
+
 dependencies {
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.constraintlayout)
     implementation(libs.androidx.activity)
-    
+    implementation("androidx.cardview:cardview:1.0.0")
+
+    // OkHttp
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Для логирования запросов (опционально)
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    // Kotlin Coroutines (если еще не добавлены)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // Kotlin Serialization (для JSON)
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+
     // Room Database
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+//    implementation(libs.cardview.v7)
     ksp(libs.androidx.room.compiler)
     
     // Lifecycle

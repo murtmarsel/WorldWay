@@ -12,7 +12,8 @@
         android:layout_height="?attr/actionBarSize"
         android:background="?attr/colorPrimary"
         android:title="@string/config_list"
-        android:titleTextColor="@color/white" />
+        android:titleTextColor="@color/white"
+        app:navigationIconTint="@color/white" />
 
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnAddConfig"

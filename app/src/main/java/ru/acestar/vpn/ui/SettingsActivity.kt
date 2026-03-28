@@ -3,11 +3,15 @@ package ru.acestar.vpn.ui
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
-import androidx.core.app.NotificationManagerCompat
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.OnBackPressedCallback
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
+import ru.acestar.vpn.data.database.AppDatabase
+import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.databinding.ActivitySettingsBinding
+import ru.acestar.vpn.vpn.OpenVpnManager
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -17,10 +21,16 @@ class SettingsActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivitySettingsBinding
     private lateinit var initialProtocol: String
+    private lateinit var sessionManager: SessionManager
+    private lateinit var database: AppDatabase
 
     override fun onCreate(savedInstanceState: Bundle?) {
         ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
+
+        // ✅ Инициализация после super.onCreate
+        sessionManager = SessionManager.getInstance(this)
+        database = AppDatabase.getDatabase(this)
 
         binding = ActivitySettingsBinding.inflate(layoutInflater)
         setContentView(binding.root)
@@ -32,12 +42,14 @@ class SettingsActivity : AppCompatActivity() {
         initialProtocol = VpnSettingsPreferences.getProtocolMode(this)
         binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
         binding.toolbar.setNavigationOnClickListener { finishWithResult() }
+
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 finishWithResult()
             }
         })
 
+        // Настройка темы
         when (ThemePreferences.getThemeMode(this)) {
             ThemePreferences.THEME_LIGHT -> binding.rbThemeLight.isChecked = true
             ThemePreferences.THEME_DARK -> binding.rbThemeDark.isChecked = true
@@ -53,10 +65,12 @@ class SettingsActivity : AppCompatActivity() {
             ThemePreferences.saveThemeMode(this, mode)
         }
 
+        // Настройка VPN системных настроек
         binding.btnOpenSystemVpnSettings.setOnClickListener {
             startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
         }
 
+        // Настройка протокола
         when (VpnSettingsPreferences.getProtocolMode(this)) {
             VpnSettingsPreferences.PROTOCOL_UDP -> binding.rbProtocolUdp.isChecked = true
             VpnSettingsPreferences.PROTOCOL_TCP -> binding.rbProtocolTcp.isChecked = true
@@ -72,29 +86,78 @@ class SettingsActivity : AppCompatActivity() {
             VpnSettingsPreferences.saveProtocolMode(this, mode)
         }
 
-        val notificationsEnabled = VpnSettingsPreferences.isNotificationsEnabled(this)
-        binding.switchNotifications.isChecked = notificationsEnabled
+        // Настройка уведомлений
+        val toastNotificationsEnabled = VpnSettingsPreferences.isToastNotificationsEnabled(this)
+        binding.switchToastNotifications.isChecked = toastNotificationsEnabled
 
-        binding.switchNotifications.setOnCheckedChangeListener { _, isChecked ->
-            VpnSettingsPreferences.setNotificationsEnabled(this, isChecked)
-            if (NotificationManagerCompat.from(this).areNotificationsEnabled() != isChecked) {
-                val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
-                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
-                }
-                startActivity(intent)
-            }
+        binding.switchToastNotifications.setOnCheckedChangeListener { _, isChecked ->
+            VpnSettingsPreferences.setToastNotificationsEnabled(this, isChecked)
         }
 
+        binding.btnSystemNotifications.setOnClickListener {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+            }
+            startActivity(intent)
+        }
+
+        // Юридические ссылки
         binding.tvPrivacyPolicyFooter.setOnClickListener {
             startActivity(LegalDocumentActivity.privacyIntent(this))
         }
 
+        // Управление подпиской
         binding.tvSubscriptionManagement.setOnClickListener {
             startActivity(Intent(this, SubscriptionActivity::class.java))
         }
 
+        // ✅ Выход из системы
+        binding.tvLogout.setOnClickListener {
+            logout()
+        }
+
         binding.btnSaveSettings.setOnClickListener {
             finishWithResult()
+        }
+    }
+
+    private fun logout() {
+        // Показываем диалог подтверждения
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(R.string.logout_title)
+            .setMessage(R.string.logout_confirm)
+            .setPositiveButton(R.string.logout_yes) { _, _ ->
+                performLogout()
+            }
+            .setNegativeButton(R.string.logout_no, null)
+            .show()
+    }
+
+    private fun performLogout() {
+        // Отключаем VPN
+        OpenVpnManager.getInstance(this).disconnect()
+        OpenVpnManager.getInstance(this).resetUiStateToDisconnected()
+
+        // ✅ Очищаем сессию
+        lifecycleScope.launch {
+            try {
+                sessionManager.logout()
+
+                // Переходим на экран входа
+                val intent = Intent(this@SettingsActivity, LoginActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+                startActivity(intent)
+                finish()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                // В случае ошибки все равно переходим на экран входа
+                val intent = Intent(this@SettingsActivity, LoginActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                }
+                startActivity(intent)
+                finish()
+            }
         }
     }
 

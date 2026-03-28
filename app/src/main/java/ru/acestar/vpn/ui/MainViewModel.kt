@@ -18,10 +18,16 @@ import ru.acestar.vpn.vpn.VpnConnectionState
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
+    companion object {
+        /** Показать напоминание о подписке, если осталось меньше 7 дней. */
+        const val SUBSCRIPTION_WARN_MS = 7L * 24L * 60L * 60L * 1000L
+    }
+
     private val database = (application as VpnApplication).database
     private val userRepository = UserRepository(database.userDao())
     private val vpnConfigDao = database.vpnConfigDao()
     private val sessionManager = SessionManager.getInstance(application)
+    private var currentUserId = -1L
     val vpnManager = OpenVpnManager.getInstance(application)
 
     private val _currentUser = MutableStateFlow<User?>(null)
@@ -44,10 +50,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         observeVpnConfigs()
         ensureServerPlaceholders()
     }
-
     private fun loadCurrentUser() {
         viewModelScope.launch {
-            val userId = sessionManager.getUserId()
+            val user = sessionManager.getCurrentUser()
+            val userId = user?.id ?: -1
             if (userId != -1L) {
                 val user = userRepository.getUserById(userId)
                 _currentUser.value = user
@@ -60,33 +66,52 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _configLoaded.value = true
     }
 
+    fun clearConfigLoaded() {
+        _configLoaded.value = false
+    }
+
     fun hasActiveSubscription(): Boolean {
         return _currentUser.value?.hasActiveSubscription() == true
     }
 
-    fun logout() {
-        sessionManager.clearSession()
-        _currentUser.value = null
+    /** Почта не подтверждена по данным локального профиля. */
+    fun shouldShowEmailUnconfirmedBanner(): Boolean {
+        return _currentUser.value?.let { !it.emailConfirmed } == true
     }
+
+    /** Нет подписки или скоро истечёт (в пределах [SUBSCRIPTION_WARN_MS]). */
+    fun shouldShowSubscriptionWarningBanner(): Boolean {
+        val u = _currentUser.value ?: return false
+        if (!u.hasActiveSubscription()) return true
+        return u.subscriptionExpiresWithin(SUBSCRIPTION_WARN_MS)
+    }
+
+//    fun logout() {
+//        sessionManager.clearSession()
+//        _currentUser.value = null
+//    }
 
     fun refreshUser() {
         loadCurrentUser()
     }
 
     private fun observeVpnConfigs() {
+        if (currentUserId == -1L) return
         viewModelScope.launch {
-            vpnConfigDao.observeAll().collectLatest { configs ->
+            vpnConfigDao.observeAllByUser(currentUserId).collectLatest { configs ->
                 _vpnConfigs.value = configs
             }
         }
     }
 
     private fun ensureServerPlaceholders() {
+        if (currentUserId == -1L) return
         viewModelScope.launch {
             val source = "server_placeholder"
-            if (vpnConfigDao.countBySource(source) == 0) {
+            if (vpnConfigDao.countBySource(currentUserId, source) == 0) {
                 vpnConfigDao.insert(
                     VpnConfigEntity(
+                        userId = currentUserId,
                         name = "Сервер 1",
                         serverHost = "-",
                         configContent = "",
@@ -95,6 +120,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
                 vpnConfigDao.insert(
                     VpnConfigEntity(
+                        userId = currentUserId,
                         name = "Сервер 2",
                         serverHost = "-",
                         configContent = "",
@@ -106,8 +132,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun saveManualConfig(name: String, serverHost: String, configContent: String): Long {
+        if (currentUserId == -1L) return -1L
         return vpnConfigDao.insert(
             VpnConfigEntity(
+                userId = currentUserId,
                 name = name,
                 serverHost = serverHost,
                 configContent = configContent,
@@ -117,8 +145,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun saveServerConfig(name: String, serverHost: String, configContent: String): Long {
+        if (currentUserId == -1L) return -1L
         return vpnConfigDao.insert(
             VpnConfigEntity(
+                userId = currentUserId,
                 name = name,
                 serverHost = serverHost,
                 configContent = configContent,
@@ -128,6 +158,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     suspend fun getConfigById(id: Long): VpnConfigEntity? {
-        return vpnConfigDao.getById(id)
+        if (currentUserId == -1L) return null
+        return vpnConfigDao.getByIdForUser(id, currentUserId)
+    }
+
+    suspend fun deleteManualConfig(id: Long) {
+        if (currentUserId == -1L) return
+        vpnConfigDao.deleteManualById(id, currentUserId)
+    }
+
+    suspend fun setFavoriteConfig(id: Long, favorite: Boolean) {
+        if (currentUserId == -1L) return
+        vpnConfigDao.setFavorite(id, currentUserId, favorite)
+    }
+
+    suspend fun getFavoriteCount(): Int {
+        if (currentUserId == -1L) return 0
+        return vpnConfigDao.getFavoriteCount(currentUserId)
     }
 }

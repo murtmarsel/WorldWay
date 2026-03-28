@@ -9,6 +9,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.databinding.ActivityLoginBinding
 
 class LoginActivity : AppCompatActivity() {
@@ -19,17 +20,20 @@ class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
-        
-        if (viewModel.isLoggedIn()) {
-            navigateToMain()
-            return
-        }
-        
+
         binding = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(binding.root)
         
         setupUI()
         observeViewModel()
+
+        // Если токен в БД валиден — сразу переходим в приложение.
+        val sessionManager = SessionManager.getInstance(this)
+        lifecycleScope.launch {
+            if (sessionManager.isLoggedIn()) {
+                navigateToMain()
+            }
+        }
     }
     
     private fun setupUI() {

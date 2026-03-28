@@ -26,7 +26,8 @@
         <activity
             android:name=".ui.LoginActivity"
             android:exported="true"
-            android:theme="@style/Theme.VPN.NoActionBar">
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -36,32 +37,62 @@
         <activity
             android:name=".ui.RegisterActivity"
             android:exported="false"
-            android:theme="@style/Theme.VPN.NoActionBar" />
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
+
+        <activity
+            android:name=".ui.EmailConfirmationActivity"
+            android:exported="false"
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
 
         <activity
             android:name=".ui.MainActivity"
             android:exported="false"
-            android:theme="@style/Theme.VPN.NoActionBar" />
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
+
+        <activity
+            android:name=".ui.AdminActivity"
+            android:exported="false"
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait" />
 
         <activity
             android:name=".ui.SettingsActivity"
             android:exported="false"
-            android:theme="@style/Theme.VPN.NoActionBar" />
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
 
         <activity
             android:name=".ui.LegalDocumentActivity"
             android:exported="false"
-            android:theme="@style/Theme.VPN.NoActionBar" />
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
 
         <activity
             android:name=".ui.SubscriptionActivity"
             android:exported="false"
-            android:theme="@style/Theme.VPN.NoActionBar" />
-
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
+<!--            <intent-filter>-->
+<!--                <action android:name="android.intent.action.VIEW" />-->
+<!--                <category android:name="android.intent.category.DEFAULT" />-->
+<!--                <category android:name="android.intent.category.BROWSABLE" />-->
+<!--                <data android:scheme="vpnapp" android:host="payment-result" />-->
+<!--            </intent-filter>-->
         <activity
             android:name=".ui.ConfigSelectionActivity"
             android:exported="false"
-            android:theme="@style/Theme.VPN.NoActionBar" />
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
+
+        <activity
+            android:name=".ui.PaymentWebViewActivity"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:exported="false"
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
 
         <!-- Library components: add android:exported required since targetSdk 31+ -->
         <activity
@@ -100,7 +131,8 @@
             android:authorities="${applicationId}.openvpn.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true"
-            tools:node="replace" />
+            tools:node="replace"
+            android:screenOrientation="portrait"/>
 
     </application>
 

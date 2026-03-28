@@ -12,12 +12,21 @@ interface VpnConfigDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(config: VpnConfigEntity): Long
 
-    @Query("SELECT * FROM vpn_configs ORDER BY createdAt DESC")
-    fun observeAll(): Flow<List<VpnConfigEntity>>
+    @Query("SELECT * FROM vpn_configs WHERE userId = :userId ORDER BY createdAt DESC")
+    fun observeAllByUser(userId: Long): Flow<List<VpnConfigEntity>>
 
-    @Query("SELECT COUNT(*) FROM vpn_configs WHERE source = :source")
-    suspend fun countBySource(source: String): Int
+    @Query("SELECT COUNT(*) FROM vpn_configs WHERE userId = :userId AND source = :source")
+    suspend fun countBySource(userId: Long, source: String): Int
 
-    @Query("SELECT * FROM vpn_configs WHERE id = :id LIMIT 1")
-    suspend fun getById(id: Long): VpnConfigEntity?
+    @Query("SELECT * FROM vpn_configs WHERE id = :id AND userId = :userId LIMIT 1")
+    suspend fun getByIdForUser(id: Long, userId: Long): VpnConfigEntity?
+
+    @Query("DELETE FROM vpn_configs WHERE id = :id AND userId = :userId AND source = 'manual'")
+    suspend fun deleteManualById(id: Long, userId: Long)
+
+    @Query("UPDATE vpn_configs SET isFavorite = :favorite WHERE id = :id AND userId = :userId")
+    suspend fun setFavorite(id: Long, userId: Long, favorite: Boolean)
+
+    @Query("SELECT COUNT(*) FROM vpn_configs WHERE userId = :userId AND isFavorite = 1")
+    suspend fun getFavoriteCount(userId: Long): Int
 }
