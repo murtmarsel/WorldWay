@@ -15,11 +15,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
 import ru.acestar.vpn.VpnApplication
+import ru.acestar.vpn.data.model.User
 import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.data.model.VpnConfigEntity
 import ru.acestar.vpn.databinding.ActivityConfigSelectionBinding
@@ -35,7 +36,7 @@ class ConfigSelectionActivity : AppCompatActivity() {
     private lateinit var binding: ActivityConfigSelectionBinding
     private val configDao by lazy { (application as VpnApplication).database.vpnConfigDao() }
     private val sessionManager by lazy { SessionManager.getInstance(this) }
-    private var currentUserId: Long = -1L
+    private val currentUserId = MutableStateFlow(-1L)
     private var configs: List<VpnConfigEntity> = emptyList()
     private var activeConfigId: Long = -1L
 
@@ -46,38 +47,53 @@ class ConfigSelectionActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+
         ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
 
 
-        if (currentUserId == -1L) {
-            finish()
-            return
-        }
         lifecycleScope.launch {
-            val user = sessionManager.getCurrentUser()
-            currentUserId = user?.id ?: -1
+            currentUserId.collect { userId ->
+                if (userId != -1L) {
+                    binding = ActivityConfigSelectionBinding.inflate(layoutInflater)
+
+                    setContentView(binding.root)
+                    activeConfigId = intent.getLongExtra(EXTRA_ACTIVE_CONFIG_ID, -1L)
+                    setupUi()
+                    observeConfigs()
+
+                    if (intent.getBooleanExtra(EXTRA_OPEN_ADD, false)) {
+                        binding.root.post { configFilePicker.launch("*/*") }
+                    }
+
+                }
+            }
         }
-        binding = ActivityConfigSelectionBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-        activeConfigId = intent.getLongExtra(EXTRA_ACTIVE_CONFIG_ID, -1L)
-        setupUi()
-        observeConfigs()
-        if (intent.getBooleanExtra(EXTRA_OPEN_ADD, false)) {
-            binding.root.post { configFilePicker.launch("*/*") }
+
+        lifecycleScope.launch {
+            currentUserId.value = sessionManager.getUserId()
+
         }
+
+//        if (currentUserId.value == -1L) {
+//            finish()
+//            return
+//        }
+
+
     }
 
     private fun setupUi() {
+
         binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.btnAddConfig.setOnClickListener { configFilePicker.launch("*/*") }
     }
 
     private fun observeConfigs() {
-        if (currentUserId == -1L) return
+        if (currentUserId.value == -1L) return
         lifecycleScope.launch {
-            configDao.observeAllByUser(currentUserId).collectLatest { list ->
+            configDao.observeAllByUser(currentUserId.value).collectLatest { list ->
                 configs = list.filter { it.configContent.isNotBlank() }
                 renderList()
             }
@@ -93,10 +109,12 @@ class ConfigSelectionActivity : AppCompatActivity() {
         binding.lvConfigs.adapter = ConfigListAdapter()
         binding.lvConfigs.setOnItemClickListener { _, _, position, _ ->
             val selected = configs[position]
+
             setResult(
                 Activity.RESULT_OK,
                 Intent().putExtra(EXTRA_SELECTED_CONFIG_ID, selected.id)
             )
+            println(selected.id)
             finish()
         }
     }
@@ -113,7 +131,7 @@ class ConfigSelectionActivity : AppCompatActivity() {
                 lifecycleScope.launch {
                     configDao.insert(
                         VpnConfigEntity(
-                            userId = currentUserId,
+                            userId = currentUserId.value,
                             name = name,
                             serverHost = host,
                             configContent = configText,
@@ -214,11 +232,11 @@ class ConfigSelectionActivity : AppCompatActivity() {
             )
             btnFavorite.setOnClickListener {
                 lifecycleScope.launch {
-                    if (!item.isFavorite && configDao.getFavoriteCount(currentUserId) >= 10) {
+                    if (!item.isFavorite && configDao.getFavoriteCount(currentUserId.value) >= 10) {
                         showToast(R.string.favorite_limit_reached)
                         return@launch
                     }
-                    configDao.setFavorite(item.id, currentUserId, !item.isFavorite)
+                    configDao.setFavorite(item.id, currentUserId.value, !item.isFavorite)
                 }
             }
 
@@ -234,7 +252,7 @@ class ConfigSelectionActivity : AppCompatActivity() {
                     .setMessage(messageRes)
                     .setPositiveButton(R.string.delete) { _, _ ->
                         lifecycleScope.launch {
-                            configDao.deleteManualById(item.id, currentUserId)
+                            configDao.deleteManualById(item.id, currentUserId.value)
                         }
                     }
                     .setNegativeButton(android.R.string.cancel, null)

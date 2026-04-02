@@ -47,13 +47,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadCurrentUser()
-        observeVpnConfigs()
-        ensureServerPlaceholders()
     }
     private fun loadCurrentUser() {
         viewModelScope.launch {
             val user = sessionManager.getCurrentUser()
             val userId = user?.id ?: -1
+            currentUserId = userId
+            observeVpnConfigs()
+            ensureServerPlaceholders()
             if (userId != -1L) {
                 val user = userRepository.getUserById(userId)
                 _currentUser.value = user
@@ -108,6 +109,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (currentUserId == -1L) return
         viewModelScope.launch {
             val source = "server_placeholder"
+            println("СС:${vpnConfigDao.countBySource(currentUserId, source)}")
             if (vpnConfigDao.countBySource(currentUserId, source) == 0) {
                 vpnConfigDao.insert(
                     VpnConfigEntity(

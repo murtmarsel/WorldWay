@@ -32,6 +32,33 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- ФИЛЬТР ДЛЯ ОТКРЫТИЯ ФАЙЛОВ ПО РАСШИРЕНИЮ -->
+            <intent-filter>
+                <!-- Действие: просмотр содержимого файла -->
+                <action android:name="android.intent.action.VIEW" />
+                <!-- Обязательные категории для обработки файлов -->
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <!-- Указываем, что работаем с контентом и файлами -->
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+
+                <!-- Разрешаем любые MIME-типы, чтобы система передала нам файл -->
+                <data android:mimeType="*/*" />
+                <data android:host="*" />
+
+                <!-- Шаблон для поиска файлов с вашим расширением -->
+                <!-- Замените "ваше_расширение" на нужное, например "vpn" или "ovpn" -->
+                <data android:pathPattern=".*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\..*\\.ovpn" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/.ovpn" /> <!-- или "*/*" -->
+            </intent-filter>
         </activity>
 
         <activity

@@ -37,18 +37,17 @@ class SessionManager private constructor(
     }
 
     init {
-        // ✅ Исправленный код - тип указан явно
         CoroutineScope(Dispatchers.IO).launch {
             sessionDao.getCurrentSession().collect { session: CurrentSession? ->
                 val now = System.currentTimeMillis()
                 val validSession = session?.takeIf {
-                    it.tokenExpiry > now && !it.accessToken.isNullOrBlank()
+                    it.tokenExpiry > now && !it.token.isNullOrBlank()
                 }
 
                 validSession?.let {
                     val user = User(
                         id = it.userId,
-                        email = it.userEmail,
+                        email = it.email,
                         isAdmin = it.isAdmin,
                         isNew = it.isNew,
                         isLoggedIn = true
@@ -65,17 +64,23 @@ class SessionManager private constructor(
     }
 
     suspend fun saveSession(
+        id: Long,
         user: User,
-        accessToken: String?,
-        refreshToken: String? = null,
+        email: String? = null,
+        token: String?,
+        tariff: String,
+        subsEndDate: Long,
+        isConfirmed: Boolean,
+        isActive: Boolean,
+        createdAt: Long,
         expiresInSeconds: Long = 30 * 24 * 60 * 60,
-        email: String? = null
+
     ) {
         val now = System.currentTimeMillis()
         val existingCurrent = sessionDao.getCurrentSessionSync()
 
-        val normalizedToken = accessToken?.takeIf { it.isNotBlank() }
-        val tokenToSave = normalizedToken ?: existingCurrent?.accessToken
+        val normalizedToken = token?.takeIf { it.isNotBlank() }
+        val tokenToSave = normalizedToken ?: existingCurrent?.token
 
         // Основной источник срока действия — exp внутри токена (если это JWT).
         val tokenExpiryFromToken = normalizedToken?.let { JwtTokenUtils.extractExpiryMillis(it) }
@@ -91,8 +96,7 @@ class SessionManager private constructor(
         val sessionId = if (normalizedToken != null && !normalizedToken.isBlank()) {
             val session = Session(
                 userId = user.id,
-                accessToken = normalizedToken,
-                refreshToken = refreshToken,
+                token = normalizedToken,
                 tokenExpiry = tokenExpiryToSave,
                 email = email,
                 isActive = true
@@ -100,12 +104,11 @@ class SessionManager private constructor(
             sessionDao.insertSession(session)
         } else {
             // Токен не прислали (сервер сказал "у тебя уже валиден") — переиспользуем старую sessionId.
-            existingCurrent?.sessionId
+            existingCurrent?.id
                 ?: run {
                     val fallbackSession = Session(
                         userId = user.id,
-                        accessToken = tokenToSave,
-                        refreshToken = refreshToken,
+                        token = tokenToSave,
                         tokenExpiry = tokenExpiryToSave,
                         email = email,
                         isActive = true
@@ -116,13 +119,17 @@ class SessionManager private constructor(
 
         sessionDao.saveCurrentSession(
             CurrentSession(
-                sessionId = sessionId,
                 userId = user.id,
-                userEmail = user.email,
-                accessToken = tokenToSave,
+                email = user.email,
+                token = tokenToSave,
                 tokenExpiry = tokenExpiryToSave,
                 isAdmin = user.isAdmin,
-                isNew = user.isNew
+                isNew = user.isNew,
+                tariff = tariff,
+                isActive = isActive,
+                isConfirmed = isConfirmed,
+                subsEndDate = subsEndDate,
+                createdAt = createdAt
             )
         )
 
@@ -150,21 +157,28 @@ class SessionManager private constructor(
     suspend fun getAccessToken(): String? {
         val session = sessionDao.getCurrentSessionSync()
         val now = System.currentTimeMillis()
-        return session?.takeIf { it.tokenExpiry > now && !it.accessToken.isNullOrBlank() }?.accessToken
+        return session?.takeIf { it.tokenExpiry > now && !it.token.isNullOrBlank() }?.token
     }
 
     suspend fun getCurrentUser(): User? {
         val session = sessionDao.getCurrentSessionSync()
         val now = System.currentTimeMillis()
-        return session?.takeIf { it.tokenExpiry > now && !it.accessToken.isNullOrBlank() }?.let {
+        return session?.takeIf { it.tokenExpiry > now && !it.token.isNullOrBlank() }?.let {
             User(
                 id = it.userId,
-                email = it.userEmail,
+                email = it.email,
+                subsEndDate = it.subsEndDate,
+                isActive = it.isActive,
+                createdAt = it.createdAt,
+                emailConfirmed = it.isConfirmed,
                 isAdmin = it.isAdmin,
                 isNew = it.isNew,
                 isLoggedIn = true
             )
         }
+    }
+    suspend fun getUserId(): Long{
+        return getCurrentUser()!!.id
     }
 
     suspend fun updateToken(newToken: String, expiry: Long) {
@@ -174,7 +188,7 @@ class SessionManager private constructor(
     suspend fun isLoggedIn(): Boolean {
         val session = sessionDao.getCurrentSessionSync()
         val now = System.currentTimeMillis()
-        return session != null && session.tokenExpiry > now && !session.accessToken.isNullOrBlank()
+        return session != null && session.tokenExpiry > now && !session.token.isNullOrBlank()
     }
 
     suspend fun logout() {

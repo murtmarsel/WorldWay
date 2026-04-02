@@ -7,18 +7,7 @@ import java.sql.Date
 data class RegRequest(
     val email: String,
     val password: String,
-    val isConfirmed: Boolean,
-    val createDate: Date,
-    val tariff: String,
-    val isNew: Boolean,
-    val isAdmin: Boolean = false
-)
-
-@Serializable
-data class AuthRequest(
-    val email: String,
-    val password: String,
-    val metadata: Map<String, String>? = null
+    val createDate: Date
 )
 
 @Serializable
@@ -33,24 +22,16 @@ data class ConfirmEmail(
 )
 
 @Serializable
-data class SendConfirmEmailCode(
-    val email: String,
-    val isConfirmed: Boolean,
-)
-
-@Serializable
-data class ConfirmData(
-    val isConfirmed: Boolean,
-)
-
-@Serializable
 data class AuthData(
+    val id: Long,
     val email: String,
     val isConfirmed: Boolean,
     val isNew: Boolean = true,
     val token: String? = null,
-    val tariff: String? = "Free",
+    val tariff: String = "Free",
     val tokenExpiresAt: Date? = null,
-    val subsEndDate: Long?  = null,
-    val isAdmin: Boolean = false
+    val subsEndDate: Long,
+    val isAdmin: Boolean = false,
+    val isActive: Boolean = true,
+    val createdAt: Long = -1L
 )

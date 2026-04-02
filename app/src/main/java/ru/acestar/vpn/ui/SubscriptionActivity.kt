@@ -25,13 +25,13 @@ import java.util.Locale
 class SubscriptionActivity : AppCompatActivity() {
 
     private val paymentApiService by lazy { PaymentApiService(sessionManager) }
-    private val authApiService = AuthApiService()
     private lateinit var binding: ActivitySubscriptionBinding
     private val viewModel: PaymentViewModel by viewModels()
     private var currentUser: User? = null
     private var currentUserId: Long = -1L
     private var currentPaymentId: String? = null
     private val sessionManager by lazy { SessionManager.getInstance(this) }
+    private val authApiService = AuthApiService(sessionManager)
     private val userRepository by lazy {
         UserRepository((application as VpnApplication).database.userDao())
     }

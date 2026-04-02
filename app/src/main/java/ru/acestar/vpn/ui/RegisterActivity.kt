@@ -17,20 +17,21 @@ import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
 import ru.acestar.vpn.VpnApplication
 import ru.acestar.vpn.api.AuthApiService
-import ru.acestar.vpn.data.model.AuthData
 import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.data.repository.UserRepository
+import ru.acestar.vpn.data.dao.VpnServerConfigDao
 import ru.acestar.vpn.utils.PasswordHasher
 import ru.acestar.vpn.databinding.ActivityRegisterBinding
 
 class RegisterActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityRegisterBinding
-    private val authApiService = AuthApiService()
     private val sessionManager by lazy { SessionManager.getInstance(this) }
+    private val authApiService = AuthApiService(sessionManager)
     private val userRepository by lazy {
         UserRepository((application as VpnApplication).database.userDao())
     }
+//    private val vpnServerConfigDao = (application as VpnApplication).database.vpnServerConfigDao()
     private val viewModel: AuthViewModel by viewModels()
     private var pendingEmail: String = ""
     private var pendingPassword: String = ""
@@ -42,6 +43,7 @@ class RegisterActivity : AppCompatActivity() {
     private var registrationSucceeded: Boolean = false
     private var registrationErrorMessage: String? = null
 
+
     private val agreementLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -49,6 +51,7 @@ class RegisterActivity : AppCompatActivity() {
             lifecycleScope.launch {
                 registrationJob?.join()
                 if (registrationSucceeded) {
+                    viewModel.login(pendingEmail, pendingPassword)
                     navigateToMain()
                 } else {
                     showErrorDialog(registrationErrorMessage ?: "Ошибка регистрации")
@@ -69,10 +72,7 @@ class RegisterActivity : AppCompatActivity() {
                 create_client(
                     email = pendingEmail,
                     password = pendingPassword,
-                    isConfirmed = false,
                     createDate = pendingCreateDate,
-                    tariff = pendingTariff,
-                    isNew = pendingIsNew
                 )
             }
             agreementLauncher.launch(LegalDocumentActivity.agreementIntent(this))
@@ -80,6 +80,8 @@ class RegisterActivity : AppCompatActivity() {
             Toast.makeText(this, R.string.emailConfirm_required, Toast.LENGTH_SHORT).show()
         }
     }
+
+
     
     override fun onCreate(savedInstanceState: Bundle?) {
         ThemePreferences.applyTheme(this)
@@ -97,22 +99,38 @@ class RegisterActivity : AppCompatActivity() {
             putExtra("email", pendingEmail)
         })
     }
+    private suspend fun getClientFilesList(
+        user_id: Long
+    ){
+        val result = authApiService.getClientFilesList(user_id)
+
+        result.onSuccess { VpnServerConfigEntity ->
+//            vpnServerConfigDao.insert()
+        }.onFailure{ exception ->
+            showErrorDialog("Ошибка получения данных: ${exception.hashCode()}")
+        }
+
+//        name = fileJson.optString("name", ""),
+//        path = fileJson.optString("path", ""),
+//        size = fileJson.optLong("size", 0),
+//        modified = fileJson.optDouble("modified", 0.0),
+//        type = fileJson.optString("type", "unknown"),
+//        category = fileJson.optString("category", null),
+//        protocol = fileJson.optString("protocol", null),
+//        config = fileJson.optString("config", null),
+//        content = fileJson.optString("content", null)
+
+    }
     private suspend fun create_client(
         email: String,
         password: String,
-        isConfirmed: Boolean,
         createDate: Date,
-        tariff: String,
-        isNew: Boolean
     ) {
         try {
             val result = authApiService.createUser(
                 email = email,
                 password = password,
-                isConfirmed = isConfirmed,
-                createDate = createDate as SqlDate,
-                tariff = tariff,
-                isNew = isNew
+                createDate = createDate as SqlDate
             )
 
             result.onSuccess { authData ->
@@ -121,13 +139,17 @@ class RegisterActivity : AppCompatActivity() {
                 val user = userRepository.upsertAfterServerAuth(emailTrim, passwordHash, authData)
 
                 sessionManager.saveSession(
+                    id = authData.id,
                     user = user,
-                    accessToken = authData.token,
-                    email = emailTrim
+                    token = authData.token,
+                    email = emailTrim,
+                    tariff = authData.tariff,
+                    subsEndDate = authData.subsEndDate,
+                    isConfirmed = authData.isConfirmed,
+                    isActive = authData.isActive,
+                    createdAt = authData.createdAt
                 )
 
-                // Если сервер не прислал токен в ответе (т.к. он уже действителен),
-                // берём актуальный токен из БД.
                 val tokenForConfirm = sessionManager.getAccessToken()
                 tokenForConfirm?.let { authApiService.setAuthToken(it) }
 
@@ -169,6 +191,8 @@ class RegisterActivity : AppCompatActivity() {
                 }.onFailure { exception ->
                     showErrorDialog("Ошибка подтверждения email: ${exception.message}")
                 }
+
+
             } catch (e: Exception) {
                 showErrorDialog("Ошибка: ${e.message}")
             }

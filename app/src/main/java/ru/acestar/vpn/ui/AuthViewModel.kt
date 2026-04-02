@@ -24,9 +24,9 @@ sealed class AuthState {
 }
 
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
-    
-    private val authApiService = AuthApiService()
+
     private val sessionManager = SessionManager.getInstance(application)
+    private val authApiService = AuthApiService(sessionManager)
     private val userRepository = UserRepository((application as VpnApplication).database.userDao())
     
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
@@ -49,9 +49,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     val resolvedEmail = authData.email.ifBlank { emailTrim }
                     val user = userRepository.upsertAfterServerAuth(resolvedEmail, passwordHash, authData)
                     sessionManager.saveSession(
+                        id = authData.id,
                         user = user,
-                        accessToken = authData.token,
-                        email = resolvedEmail
+                        token = authData.token,
+                        email = resolvedEmail,
+                        tariff = authData.tariff,
+                        subsEndDate = authData.subsEndDate,
+                        isConfirmed = authData.isConfirmed,
+                        isActive = authData.isActive,
+                        createdAt = authData.createdAt
                     )
                     _authState.value = AuthState.Success(user)
                 },
@@ -83,38 +89,6 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             return false
         }
         return true
-    }
-    fun register(email: String, password: String, confirmPassword: String) {
-        if (!fields_check(email, password, confirmPassword)) return
-
-        viewModelScope.launch {
-            _authState.value = AuthState.Loading
-            
-            val result = authApiService.createUser(
-                email = email.trim(),
-                password = password,
-                isConfirmed = false,
-                createDate = SqlDate(System.currentTimeMillis()),
-                tariff = "Free",
-                isNew = true
-            )
-            result.fold(
-                onSuccess = { authData ->
-                    val emailTrim = authData.email.ifBlank { email.trim() }
-                    val passwordHash = PasswordHasher.hashForServer(password, emailTrim)
-                    val user = userRepository.upsertAfterServerAuth(emailTrim, passwordHash, authData)
-                    sessionManager.saveSession(
-                        user = user,
-                        accessToken = authData.token,
-                        email = emailTrim
-                    )
-                    _authState.value = AuthState.Success(user)
-                },
-                onFailure = { exception ->
-                    _authState.value = AuthState.Error(exception.message ?: "Ошибка регистрации")
-                }
-            )
-        }
     }
     
     fun resetState() {

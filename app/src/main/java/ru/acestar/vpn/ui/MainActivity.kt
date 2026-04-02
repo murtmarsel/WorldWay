@@ -55,11 +55,15 @@ class MainActivity : AppCompatActivity() {
     private val configSelectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        if (result.resultCode != RESULT_OK){
+            return@registerForActivityResult
+        }
         val configId = result.data?.getLongExtra(ConfigSelectionActivity.EXTRA_SELECTED_CONFIG_ID, -1L) ?: -1L
+
         if (configId > 0) {
             lifecycleScope.launch {
                 val config = viewModel.getConfigById(configId)
+
                 if (config != null) {
                     selectedConfigId = config.id
                     selectedConfigName = config.name
@@ -94,6 +98,7 @@ class MainActivity : AppCompatActivity() {
                 // Пользователь авторизован
                 println("Пользователь авторизован")
                 val user = sessionManager.getCurrentUser()
+                println(user)
                 user?.let { sessionManager.updateCurrentUser(it) }
             } else {
                 // Пользователь не авторизован
@@ -140,7 +145,8 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnConfigList.setOnClickListener {
             configSelectionLauncher.launch(
-                Intent(this, ConfigSelectionActivity::class.java).apply {
+                Intent(this, ConfigSelectionActivity::class.java)
+                    .apply {
                     putExtra(ConfigSelectionActivity.EXTRA_ACTIVE_CONFIG_ID, selectedConfigId ?: -1L)
                 }
             )
@@ -510,6 +516,7 @@ class MainActivity : AppCompatActivity() {
             val shortHost = shortHostLabel(favorite.serverHost)
             buttons += createServerButton().apply {
                 text = "$shortHost $protocol"
+
                 applyQuickButtonState(isActive = favorite.id == selectedConfigId)
                 setOnClickListener {
                     selectedConfigId = favorite.id

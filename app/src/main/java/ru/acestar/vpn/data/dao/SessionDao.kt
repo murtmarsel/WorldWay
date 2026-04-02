@@ -1,5 +1,5 @@
 // data/database/SessionDao.kt
-package ru.acestar.vpn.data.database
+package ru.acestar.vpn.data.dao
 
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
@@ -13,7 +13,7 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE userId = :userId ORDER BY createdAt DESC")
     fun getUserSessions(userId: Long): Flow<List<Session>>
 
-    @Query("SELECT * FROM sessions WHERE accessToken = :token AND isActive = 1")
+    @Query("SELECT * FROM sessions WHERE token = :token AND isActive = 1")
     suspend fun findSessionByToken(token: String): Session?
 
     @Insert
@@ -44,6 +44,6 @@ interface SessionDao {
     @Query("DELETE FROM current_session")
     suspend fun clearCurrentSession()
 
-    @Query("UPDATE current_session SET accessToken = :token, tokenExpiry = :expiry WHERE id = 1")
+    @Query("UPDATE current_session SET token = :token, tokenExpiry = :expiry WHERE id = 1")
     suspend fun updateCurrentToken(token: String, expiry: Long)
 }

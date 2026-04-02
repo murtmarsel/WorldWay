@@ -2,6 +2,10 @@
 package ru.acestar.vpn.ui
 
 import UsersAdapter
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Typeface
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -26,6 +30,7 @@ import ru.acestar.vpn.databinding.DialogEditUserBinding
 import ru.acestar.vpn.databinding.DialogConfigsBinding
 import ru.acestar.vpn.databinding.DialogPaymentsBinding
 import ru.acestar.vpn.databinding.DialogLogsBinding
+import ru.acestar.vpn.R
 import ru.acestar.vpn.viewmodel.AdminViewModel
 
 class AdminActivity : AppCompatActivity() {
@@ -471,9 +476,11 @@ class AdminActivity : AppCompatActivity() {
         val dialogBinding = DialogConfigsBinding.inflate(layoutInflater)
         dialog.setContentView(dialogBinding.root)
 
-        val adapter = ConfigsAdapter { config ->
-            showConfigEditDialog(config)
-        }
+        val adapter = ConfigsAdapter(
+            onOpenContent = { showConfigContentReadOnlyDialog(it) },
+            onBackup = { copyConfigBackupToClipboard(it) },
+            onCertInfo = { showCertificateInfoDialog(it) }
+        )
         dialogBinding.rvConfigs.layoutManager = LinearLayoutManager(this)
         dialogBinding.rvConfigs.adapter = adapter
         adapter.submitList(configs)
@@ -481,36 +488,102 @@ class AdminActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showConfigEditDialog(config: UserConfigFile) {
+    private fun showConfigContentReadOnlyDialog(config: UserConfigFile) {
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val scrollView = android.widget.ScrollView(this)
+        val textView = TextView(this).apply {
+            text = config.content.ifBlank { "—" }
+            setTextIsSelectable(true)
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10f)
+            typeface = Typeface.MONOSPACE
+            setPadding(pad, pad, pad, pad)
+        }
+        scrollView.addView(textView)
+
         MaterialAlertDialogBuilder(this)
             .setTitle(config.name)
-            .setMessage("Тип: ${config.type}\nРазмер: ${config.size / 1024} KB")
-            .setPositiveButton("Редактировать") { _, _ ->
-                showEditConfigContentDialog(config)
-            }
-            .setNegativeButton("Закрыть", null)
-            .create()
+            .setView(scrollView)
+            .setPositiveButton(android.R.string.ok, null)
             .show()
     }
 
-    private fun showEditConfigContentDialog(config: UserConfigFile) {
+    private fun copyConfigBackupToClipboard(config: UserConfigFile) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("config_backup_${config.name}", config.content)
+        cm.setPrimaryClip(clip)
+        showSuccess(getString(R.string.admin_config_backup_done))
+    }
+
+    private fun showCertificateInfoDialog(config: UserConfigFile) {
+        val summary = buildCertificateSummary(config)
+        val pad = (16 * resources.displayMetrics.density).toInt()
         val scrollView = android.widget.ScrollView(this)
-        val editText = TextInputEditText(this)
-        editText.setText(config.content)
-        editText.isSingleLine = false
-        editText.setLines(20)
-        scrollView.addView(editText)
+        val textView = TextView(this).apply {
+            text = "${config.name}\n\n$summary"
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10f)
+            setPadding(pad, pad, pad, pad)
+        }
+        scrollView.addView(textView)
 
         MaterialAlertDialogBuilder(this)
-            .setTitle("Редактирование: ${config.name}")
+            .setTitle(getString(R.string.admin_config_cert_info_title))
             .setView(scrollView)
-            .setPositiveButton("Сохранить") { _, _ ->
-                val newContent = editText.text.toString()
-                // TODO: Отправить изменения на сервер
-                showSuccess("Конфигурация сохранена")
-            }
-            .setNegativeButton("Отмена", null)
+            .setPositiveButton(android.R.string.ok, null)
             .show()
+    }
+
+    private fun buildCertificateSummary(config: UserConfigFile): String {
+        val c = config.content
+        val sb = StringBuilder()
+        val isWg = config.protocol?.contains("wireguard", ignoreCase = true) == true ||
+            config.type.contains("wireguard", ignoreCase = true) ||
+            c.trimStart().startsWith("[Interface]")
+        if (isWg) {
+            sb.appendLine("Формат: WireGuard")
+            var foundWg = false
+            if (c.contains("PrivateKey")) {
+                sb.appendLine("• Приватный ключ (Interface)")
+                foundWg = true
+            }
+            if (c.contains("PresharedKey")) {
+                sb.appendLine("• Preshared key")
+                foundWg = true
+            }
+            if (c.contains("[Peer]") && c.contains("PublicKey")) {
+                sb.appendLine("• Публичный ключ пира")
+                foundWg = true
+            }
+            if (!foundWg) sb.appendLine("Стандартные поля ключей не обнаружены.")
+        } else {
+            sb.appendLine("Формат: OpenVPN / текстовый конфиг")
+            var found = false
+            if (c.contains("<ca>")) {
+                sb.appendLine("• Блок CA (<ca>)")
+                found = true
+            }
+            if (c.contains("<cert>")) {
+                sb.appendLine("• Клиентский сертификат (<cert>)")
+                found = true
+            }
+            if (c.contains("<key>")) {
+                sb.appendLine("• Клиентский ключ (<key>)")
+                found = true
+            }
+            if (c.contains("<tls-auth>") || c.contains("tls-auth", ignoreCase = true)) {
+                sb.appendLine("• TLS-auth")
+                found = true
+            }
+            if (c.contains("<tls-crypt>")) {
+                sb.appendLine("• TLS-crypt")
+                found = true
+            }
+            if (!c.contains("<cert>") && c.contains("-----BEGIN CERTIFICATE-----")) {
+                sb.appendLine("• PEM-сертификат(ы) в тексте")
+                found = true
+            }
+            if (!found) sb.appendLine("Стандартные блоки OpenVPN не найдены.")
+        }
+        return sb.toString().trimEnd()
     }
 
     private fun showStatsDialog(stats: UserStats) {

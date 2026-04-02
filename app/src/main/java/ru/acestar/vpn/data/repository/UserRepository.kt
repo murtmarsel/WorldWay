@@ -85,6 +85,7 @@ class UserRepository(private val userDao: UserDao) {
         return userDao.observeUser(id)
     }
 
+
     suspend fun updateSubscription(userId: Long, durationDays: Int) {
         val currentTime = System.currentTimeMillis()
         val endDate = currentTime + (durationDays * 24 * 60 * 60 * 1000L)

@@ -159,6 +159,16 @@
     <string name="admin_tab_logs">Логи</string>
     <string name="admin_users_hint">Нажмите на карточку для управления пользователем</string>
     <string name="admin_configs_title">Конфигурационные файлы</string>
+    <string name="admin_config_open_content">Открыть содержимое файла</string>
+    <string name="admin_config_backup">Создать резервную копию в буфер обмена</string>
+    <string name="admin_config_cert_info">Информация о сертификатах</string>
+    <string name="admin_config_cert_info_title">Сертификаты и ключи</string>
+    <string name="admin_config_backup_done">Резервная копия скопирована в буфер обмена</string>
+    <string name="admin_config_path_label">Путь: %1$s</string>
+    <string name="admin_config_size_label">Размер: %1$s</string>
+    <string name="admin_config_type_label">Тип: %1$s</string>
+    <string name="admin_config_category_label">Категория: %1$s</string>
+    <string name="admin_config_category_empty">Категория: —</string>
     <string name="admin_user_id_hint">ID пользователя</string>
     <string name="admin_load">Загрузить</string>
     <string name="admin_logs_title">Системные логи</string>

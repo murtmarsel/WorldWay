@@ -6,20 +6,29 @@ import kotlinx.coroutines.withContext
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import ru.acestar.vpn.data.model.AuthData
 import ru.acestar.vpn.data.model.RegRequest
 import ru.acestar.vpn.data.model.ConfirmEmail
-import ru.acestar.vpn.data.model.GetConfigsRequest
+import ru.acestar.vpn.data.model.admin.UserConfigFile
+import ru.acestar.vpn.data.repository.SessionManager
+import ru.acestar.vpn.utils.CryptoHelper
 import ru.acestar.vpn.utils.PasswordHasher
 import java.util.Date
+import java.text.SimpleDateFormat
+import java.util.Locale
 import java.sql.Date as SqlDate
 
-class AuthApiService {
+class AuthApiService(private val sessionManager: SessionManager) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .build()
+    private suspend fun getToken(): String? {
+        val token = sessionManager.getAccessToken()
+        return token
+    }
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var pendinLoginDate: Date = Date()
@@ -75,9 +84,12 @@ class AuthApiService {
                     json.has("data") && !json.isNull("data") -> json.getJSONObject("data")
                     else -> json
                 }
+                println("Содержимое data: ${data.toString()}")
 
                 val authData = parseAuthDataFromJson(data, email)
                 Result.success(authData)
+
+
             }
         } catch (e: Exception) {
             Result.failure(e)
@@ -87,10 +99,7 @@ class AuthApiService {
     suspend fun createUser(
         email: String,
         password: String,
-        isConfirmed: Boolean,
         createDate: Date,
-        tariff: String,
-        isNew: Boolean
     ): Result<AuthData> = withContext(Dispatchers.IO) {
         try {
             val passwordHashed = PasswordHasher.hashForServer(password, email)
@@ -98,20 +107,14 @@ class AuthApiService {
             val RegRequest = RegRequest(
                 email = email,
                 password = passwordHashed,
-                isConfirmed = isConfirmed,
                 createDate = createDate as SqlDate,
-                tariff = tariff,
-                isNew = isNew
             )
 
             // Конвертируем в JSON
             val jsonBody = JSONObject().apply {
                 put("email", RegRequest.email)
                 put("password", RegRequest.password)
-                put("isConfirmed", RegRequest.isConfirmed)
                 put("createDate", RegRequest.createDate)
-                put("tariff", RegRequest.tariff)
-                put("isNew", RegRequest.isNew)
             }
 
             // Создаем HTTP запрос
@@ -153,11 +156,9 @@ class AuthApiService {
 
                     val responseEmail = when {
                         data.has("email") && data.optString("email").isNotBlank() -> data.optString("email")
-                        json.has("email") && json.optString("email").isNotBlank() -> json.optString("email")
                         else -> ""
                     }
 
-                    // Сервер часто не дублирует email в теле ответа — используем адрес из запроса регистрации.
                     val authData = parseAuthDataFromJson(data, responseEmail.ifBlank { email })
                     Result.success(authData)
                 } else {
@@ -197,95 +198,12 @@ class AuthApiService {
         }
     }
 
-    suspend fun getConfigs(
-        userId: Int
-    ): Result<AuthData> = withContext(Dispatchers.IO) {
-        try {
-            // Создаем запрос
-            val GetConfigsRequest = GetConfigsRequest(
-                userId = userId,
-            )
-
-            // Конвертируем в JSON
-            val jsonBody = JSONObject().apply {
-                put("userId", GetConfigsRequest.userId)
-            }
-
-            // Создаем HTTP запрос
-            val requestBuilder = Request.Builder()
-                .url("$baseUrl/api/v1/getConfigs")
-                .post(jsonBody.toString().toRequestBody(jsonMediaType))
-                .addHeader("Content-Type", "application/json")
-
-            // Добавляем токен авторизации, если он есть
-            authToken?.let { token ->
-                requestBuilder.addHeader("Auth", "Bearer $token")
-            }
-
-            val request = requestBuilder.build()
-
-            // Выполняем запрос
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
-
-                if (!response.isSuccessful) {
-                    val errorMsg = try {
-                        val json = JSONObject(responseBody ?: "")
-                        json.optString("error", "Unknown error")
-                    } catch (e: Exception) {
-                        "HTTP ${response.code}: ${response.message}"
-                    }
-                    return@withContext Result.failure(Exception(errorMsg))
-                }
-
-                // Парсим ответ
-                val json = JSONObject(responseBody ?: "")
-                val success = json.optBoolean("success", false)
-
-                if (success) {
-                    val data = when {
-                        json.has("data") && !json.isNull("data") -> json.getJSONObject("data")
-                        else -> json
-                    }
-
-                    val email = when {
-                        data.has("email") -> data.optString("email")
-                        json.has("email") -> json.optString("email")
-                        else -> ""
-                    }
-
-                    val status = when {
-                        data.has("status") -> data.optString("status")
-                        json.has("status") -> json.optString("status")
-                        else -> "ok"
-                    }
-
-                    val isConfirmed = when {
-                        data.has("isConfirmed") -> data.optBoolean("isConfirmed")
-                        json.has("isConfirmed") -> json.optBoolean("isConfirmed")
-                        else -> false
-                    }
-
-                    val authData = AuthData(
-                        email = email,
-                        isConfirmed = isConfirmed
-                    )
-                    Result.success(authData)
-                } else {
-                    val error = json.optString("error", "Unknown error")
-                    Result.failure(Exception(error))
-                }
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
     suspend fun confirmEmail(
         email: String,
         isConfirmed: Boolean,
     ): Result<ConfirmEmail> = withContext(Dispatchers.IO) {
         try {
+            val token = getToken()
             // Создаем запрос
             val ConfirmEmail = ConfirmEmail(
                 email = email,
@@ -302,12 +220,8 @@ class AuthApiService {
             val requestBuilder = Request.Builder()
                 .url("$baseUrl/api/v1/reg/confirm")
                 .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                .addHeader("Authorization", "Bearer $token")
                 .addHeader("Content-Type", "application/json")
-
-            // Добавляем токен авторизации, если он есть
-            authToken?.let { token ->
-                requestBuilder.addHeader("Sign Up", "Bearer $token")
-            }
 
             val request = requestBuilder.build()
 
@@ -364,187 +278,130 @@ class AuthApiService {
         }
     }
 
-    suspend fun loginUser(
-        email: String,
-        isConfirmed: Boolean,
-    ): Result<ConfirmEmail> = withContext(Dispatchers.IO) {
-        try {
-            // Создаем запрос
-            val ConfirmEmail = ConfirmEmail(
-                email = email,
-                isConfirmed = isConfirmed
-            )
-
-            // Конвертируем в JSON
-            val jsonBody = JSONObject().apply {
-                put("email", ConfirmEmail.email)
-                put("isConfirmed", ConfirmEmail.isConfirmed)
-            }
-
-            // Создаем HTTP запрос
-            val requestBuilder = Request.Builder()
-                .url("$baseUrl/api/v1/reg/confirm")
-                .post(jsonBody.toString().toRequestBody(jsonMediaType))
-                .addHeader("Content-Type", "application/json")
-
-            // Добавляем токен авторизации, если он есть
-            authToken?.let { token ->
-                requestBuilder.addHeader("Sign Up", "Bearer $token")
-            }
-
-            val request = requestBuilder.build()
-
-            // Выполняем запрос
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
-
-                if (!response.isSuccessful) {
-                    val errorMsg = try {
-                        val json = JSONObject(responseBody ?: "")
-                        json.optString("error", "Unknown error")
-                    } catch (e: Exception) {
-                        "HTTP ${response.code}: ${response.message}"
-                    }
-                    return@withContext Result.failure(Exception(errorMsg))
-                }
-
-                // Парсим ответ
-                val json = JSONObject(responseBody ?: "")
-                val success = json.optBoolean("success", false)
-
-                if (success) {
-                    // Некоторые бэкенды могут не возвращать поле "status" или вкладывать данные иначе.
-                    // Делаем парсинг более устойчивым, чтобы избежать "No value for status".
-                    val data = when {
-                        json.has("data") && !json.isNull("data") -> json.getJSONObject("data")
-                        else -> json
-                    }
-
-                    val email = when {
-                        data.has("email") -> data.optString("email")
-                        json.has("email") -> json.optString("email")
-                        else -> ""
-                    }
-
-                    val isConfirmed = when {
-                        data.has("isConfirmed") -> data.optBoolean("isConfirmed")
-                        json.has("isConfirmed") -> json.optBoolean("isConfirmed")
-                        else -> false
-                    }
-
-                    val authData = ConfirmEmail(
-                        email = email,
-                        isConfirmed = isConfirmed
+    suspend fun getClientFilesList(clientName: Long): Result<List<UserConfigFile>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val token = getToken()
+                    ?: return@withContext Result.failure(
+                        Exception("Нет токена пользователя. Войдите в приложение (JWT в сессии).")
                     )
-                    Result.success(authData)
-                } else {
-                    val error = json.optString("error", "Unknown error")
-                    Result.failure(Exception(error))
+
+                Log.d("AdminApiService", "📤 Getting configs list for user id: $clientName")
+
+                val request = Request.Builder()
+                    .url("$baseUrl/api/users/$clientName/configs")
+                    .get()
+                    .addHeader("Authorization", "Bearer $token")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string()
+                    Log.d("AdminApiService", "📥 Response code: ${response.code}")
+
+                    if (!response.isSuccessful) {
+                        return@withContext Result.failure(
+                            Exception("HTTP ${response.code}: ${response.message}")
+                        )
+                    }
+
+                    if (responseBody.isNullOrEmpty()) {
+                        return@withContext Result.failure(Exception("Empty response"))
+                    }
+
+                    // Парсим JSON ответ
+                    val jsonResponse = JSONObject(responseBody)
+                    val success = jsonResponse.optBoolean("success", false)
+
+                    if (!success) {
+                        val error = jsonResponse.optString("error", "Unknown error")
+                        return@withContext Result.failure(Exception(error))
+                    }
+
+                    val encrypted = jsonResponse.optBoolean("enc", false)
+                    val encryptedData = jsonResponse.optString("data", null)
+
+                    if (encrypted && encryptedData != null) {
+                        // ✅ 1. Расшифровываем данные
+                        val decryptedJson = CryptoHelper.decryptData(encryptedData, token)
+                        Log.d("AdminApiService", "🔓 Decrypted data: $decryptedJson")
+
+                        // ✅ 2. Парсим расшифрованный JSON
+                        val filesData = JSONObject(decryptedJson)
+
+                        // ✅ 3. Получаем массив files из data
+                        val filesArray = filesData.optJSONArray("files") ?: JSONArray()
+                        val filesList = mutableListOf<UserConfigFile>()
+
+                        for (i in 0 until filesArray.length()) {
+                            val fileJson = filesArray.getJSONObject(i)
+                            val file = UserConfigFile(
+                                name = fileJson.optString("name", ""),
+                                path = fileJson.optString("path", ""),
+                                size = fileJson.optLong("size", 0),
+                                modified = fileJson.optDouble("modified", 0.0),
+                                type = fileJson.optString("type", "unknown"),
+                                category = fileJson.optString("category", null),
+                                protocol = fileJson.optString("protocol", null),
+                                config = fileJson.optString("config", null),
+                                content = fileJson.optString("content", null)
+                            )
+                            filesList.add(file)
+                        }
+
+                        Result.success(filesList)
+                    } else {
+                        Result.failure(Exception("Expected encrypted data"))
+                    }
                 }
+            } catch (e: Exception) {
+                Log.e("AdminApiService", "Error getting files list", e)
+                Result.failure(e)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
-    }
-    suspend fun sendConfirmEmailCode(
-        email: String,
-        isConfirmed: Boolean,
-    ): Result<ConfirmEmail> = withContext(Dispatchers.IO) {
-        try {
-            // Создаем запрос
-            val ConfirmEmail = ConfirmEmail(
-                email = email,
-                isConfirmed = isConfirmed
-            )
-
-            // Конвертируем в JSON
-            val jsonBody = JSONObject().apply {
-                put("email", ConfirmEmail.email)
-                put("isConfirmed", ConfirmEmail.isConfirmed)
-            }
-
-            // Создаем HTTP запрос
-            val requestBuilder = Request.Builder()
-                .url("$baseUrl/api/v1/reg/confirm")
-                .post(jsonBody.toString().toRequestBody(jsonMediaType))
-                .addHeader("Content-Type", "application/json")
-
-            // Добавляем токен авторизации, если он есть
-            authToken?.let { token ->
-                requestBuilder.addHeader("Sign Up", "Bearer $token")
-            }
-
-            val request = requestBuilder.build()
-
-            // Выполняем запрос
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
-
-                if (!response.isSuccessful) {
-                    val errorMsg = try {
-                        val json = JSONObject(responseBody ?: "")
-                        json.optString("error", "Unknown error")
-                    } catch (e: Exception) {
-                        "HTTP ${response.code}: ${response.message}"
-                    }
-                    return@withContext Result.failure(Exception(errorMsg))
-                }
-
-                // Парсим ответ
-                val json = JSONObject(responseBody ?: "")
-                val success = json.optBoolean("success", false)
-
-                if (success) {
-                    // Некоторые бэкенды могут не возвращать поле "status" или вкладывать данные иначе.
-                    // Делаем парсинг более устойчивым, чтобы избежать "No value for status".
-                    val data = when {
-                        json.has("data") && !json.isNull("data") -> json.getJSONObject("data")
-                        else -> json
-                    }
-
-                    val email = when {
-                        data.has("email") -> data.optString("email")
-                        json.has("email") -> json.optString("email")
-                        else -> ""
-                    }
-
-                    val isConfirmed = when {
-                        data.has("isConfirmed") -> data.optBoolean("isConfirmed")
-                        json.has("isConfirmed") -> json.optBoolean("isConfirmed")
-                        else -> false
-                    }
-
-                    val authData = ConfirmEmail(
-                        email = email,
-                        isConfirmed = isConfirmed
-                    )
-                    Result.success(authData)
-                } else {
-                    val error = json.optString("error", "Unknown error")
-                    Result.failure(Exception(error))
-                }
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
 
     private fun parseAuthDataFromJson(data: JSONObject, fallbackEmail: String): AuthData {
         val email = when {
-            data.has("email") && data.optString("email").isNotBlank() -> data.optString("email")
+            data.optString("email").isNotBlank() -> data.optString("email")
             else -> fallbackEmail
         }
         val token = when {
             data.has("token") -> data.optString("token", "")
             else -> ""
         }.takeIf { it.isNotBlank() }
+        val is_confirmed = when {
+            data.optBoolean("isConfirmed") -> data.optBoolean("isConfirmed")
+            else -> false
+        }
+
+        val is_new = when {
+            data.optBoolean("isNew") -> data.optBoolean("isNew")
+            else -> false
+        }
+
+        val subsEndDate: String  = when {
+            data.has("subsEndDate") && data.optString("subsEndDate").isNotBlank() -> data.optString("subsEndDate")
+            else -> ""
+        }
+        val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val date: Date = format.parse(subsEndDate)!!
+        val subsEndDateTimestamp: Long = date.time
+        val is_admin = when {
+            data.optBoolean("isAdmin") -> data.optBoolean("isAdmin")
+            else -> false
+        }
+
+
         return AuthData(
+            id = data.optLong("id", data.optLong("id", 1)),
             email = email,
-            isConfirmed = data.optBoolean("is_confirmed", data.optBoolean("isConfirmed", false)),
-            isNew = data.optBoolean("is_new", data.optBoolean("isNew", true)),
+            isConfirmed = data.optBoolean("isConfirmed"),
+            isNew = data.optBoolean("isNew"),
+            isActive = data.optBoolean(("isActive")),
             token = token,
-            subsEndDate = null,
-            isAdmin = data.optBoolean("is_admin", data.optBoolean("isAdmin", false))
+            subsEndDate = subsEndDateTimestamp,
+            isAdmin = data.optBoolean("isAdmin")
         )
     }
 
@@ -562,3 +419,7 @@ class AuthApiService {
         return null
     }
 }
+
+//private fun JSONObject.optLong(name: String, fallback: String): Long {
+//    return TODO("Предоставить возвращаемое значение")
+//}
