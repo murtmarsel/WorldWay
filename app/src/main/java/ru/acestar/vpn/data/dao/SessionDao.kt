@@ -21,6 +21,8 @@ interface SessionDao {
 
     @Update
     suspend fun updateSession(session: Session)
+    @Update
+    suspend fun updateCurrentSession(session: CurrentSession)
 
     @Query("UPDATE sessions SET isActive = 0 WHERE userId = :userId")
     suspend fun deactivateAllUserSessions(userId: Long)

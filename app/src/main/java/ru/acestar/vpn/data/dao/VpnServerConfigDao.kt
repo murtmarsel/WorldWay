@@ -16,6 +16,9 @@ interface VpnServerConfigDao {
     @Query("SELECT * FROM vpn_server_configs WHERE userId = :userId ORDER BY createdAt DESC")
     fun observeAllByUser(userId: Long): Flow<List<VpnServerConfigEntity>>
 
+    @Query("SELECT * FROM vpn_server_configs WHERE id = :id LIMIT 1")
+    suspend fun observeAllById(id: Long): VpnServerConfigEntity
+
 //    val id: Long = 0,
 //    val userId: Long,
 //    val name: String,

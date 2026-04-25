@@ -215,9 +215,9 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
             _statusMessage.value = "Подключение..."
 
             VPNLaunchHelper.startOpenVpn(vp, context)
-            Log.d(TAG, "VPN started directly for profile: ${vp.mName}")
+            Log.d(TAG, "Manager started directly for profile: ${vp.mName}")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start VPN", e)
+            Log.e(TAG, "Failed to start manager", e)
             _connectionState.value = VpnConnectionState.ERROR
             _statusMessage.value = "Ошибка подключения: ${e.message}"
         }
@@ -245,7 +245,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
                         }
                     }
                 } catch (e: RemoteException) {
-                    Log.e(TAG, "Error stopping VPN via service", e)
+                    Log.e(TAG, "Ошибка остановки", e)
                 }
             } else {
                 _connectionState.value = VpnConnectionState.DISCONNECTED
@@ -272,31 +272,31 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
 
     fun pause() {
         val service = mService ?: run {
-            _statusMessage.value = "Сервис VPN недоступен"
+            _statusMessage.value = "Сервис недоступен"
             return
         }
         try {
             service.userPause(true)
             _isPaused.value = true
-            _statusMessage.value = "Пауза VPN"
+            _statusMessage.value = "Пауза"
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to pause VPN", e)
-            _statusMessage.value = "Не удалось поставить VPN на паузу"
+            Log.e(TAG, "Failed to pause", e)
+            _statusMessage.value = "Не удалось поставить на паузу"
         }
     }
 
     fun resume() {
         val service = mService ?: run {
-            _statusMessage.value = "Сервис VPN недоступен"
+            _statusMessage.value = "Сервис недоступен"
             return
         }
         try {
             service.userPause(false)
             _isPaused.value = false
-            _statusMessage.value = "VPN возобновлен"
+            _statusMessage.value = "Возобновлен"
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to resume VPN", e)
-            _statusMessage.value = "Не удалось возобновить VPN"
+            Log.e(TAG, "Failed to resume", e)
+            _statusMessage.value = "Не удалось возобновить"
         }
     }
 

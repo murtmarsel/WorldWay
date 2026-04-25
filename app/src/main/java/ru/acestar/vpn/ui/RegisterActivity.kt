@@ -20,6 +20,8 @@ import ru.acestar.vpn.api.AuthApiService
 import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.data.repository.UserRepository
 import ru.acestar.vpn.data.dao.VpnServerConfigDao
+import ru.acestar.vpn.data.database.AppDatabase
+import ru.acestar.vpn.data.model.VpnServerConfigEntity
 import ru.acestar.vpn.utils.PasswordHasher
 import ru.acestar.vpn.databinding.ActivityRegisterBinding
 
@@ -31,7 +33,7 @@ class RegisterActivity : AppCompatActivity() {
     private val userRepository by lazy {
         UserRepository((application as VpnApplication).database.userDao())
     }
-//    private val vpnServerConfigDao = (application as VpnApplication).database.vpnServerConfigDao()
+    private lateinit var vpnServerConfigDao: VpnServerConfigDao
     private val viewModel: AuthViewModel by viewModels()
     private var pendingEmail: String = ""
     private var pendingPassword: String = ""
@@ -74,7 +76,9 @@ class RegisterActivity : AppCompatActivity() {
                     password = pendingPassword,
                     createDate = pendingCreateDate,
                 )
+                getClientFilesList(pendingEmail)
             }
+
             agreementLauncher.launch(LegalDocumentActivity.agreementIntent(this))
         } else {
             Toast.makeText(this, R.string.emailConfirm_required, Toast.LENGTH_SHORT).show()
@@ -89,6 +93,8 @@ class RegisterActivity : AppCompatActivity() {
         
         binding = ActivityRegisterBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        vpnServerConfigDao = AppDatabase.getDatabase(applicationContext).vpnServerConfigDao()
         
         setupUI()
         observeViewModel()
@@ -99,26 +105,47 @@ class RegisterActivity : AppCompatActivity() {
             putExtra("email", pendingEmail)
         })
     }
-    private suspend fun getClientFilesList(
-        user_id: Long
-    ){
-        val result = authApiService.getClientFilesList(user_id)
+    suspend fun getClientFilesList(email: String) {
+        val result = authApiService.getClientFilesList(email, sessionManager.getAccessToken())
+        val userId = sessionManager.getUserId()
 
-        result.onSuccess { VpnServerConfigEntity ->
-//            vpnServerConfigDao.insert()
-        }.onFailure{ exception ->
-            showErrorDialog("Ошибка получения данных: ${exception.hashCode()}")
+        result.onSuccess { filesList ->
+            if (filesList.isEmpty()) {
+//                Log.d("ClientFiles", "Список файлов пуст")
+                return@onSuccess
+            }
+
+            // Записываем каждый файл в базу данных
+            filesList.forEach { file ->
+                try {
+                    // Создаем entity для базы данных
+                    val configEntity = VpnServerConfigEntity(
+                        userId = userId,
+                        name = file.name,
+                        type = file.type,
+                        category = file.category!!,
+                        protocol = file.protocol!!,
+                        content = file.content
+                    )
+
+                    // Вставляем в базу данных
+                    vpnServerConfigDao.insert(configEntity)
+
+//                    Log.d("ClientFiles", "Файл сохранен: ${file.name}")
+                } catch (e: Exception) {
+//                    Log.e("ClientFiles", "Ошибка сохранения файла ${file.name}: ${e.message}")
+                    // Можно продолжить с остальными файлами
+                }
+            }
+
+            // Показываем успешное завершение
+//            showSuccess("Загружено ${filesList.size} файлов")
+            showErrorDialog("Успешное получение файлов")
+
+        }.onFailure { exception ->
+//            Log.e("ClientFiles", "Ошибка получения данных: ${exception.message}")
+            showErrorDialog("Ошибка получения данных: ${exception.message}")
         }
-
-//        name = fileJson.optString("name", ""),
-//        path = fileJson.optString("path", ""),
-//        size = fileJson.optLong("size", 0),
-//        modified = fileJson.optDouble("modified", 0.0),
-//        type = fileJson.optString("type", "unknown"),
-//        category = fileJson.optString("category", null),
-//        protocol = fileJson.optString("protocol", null),
-//        config = fileJson.optString("config", null),
-//        content = fileJson.optString("content", null)
 
     }
     private suspend fun create_client(
@@ -137,7 +164,7 @@ class RegisterActivity : AppCompatActivity() {
                 val emailTrim = authData.email.ifBlank { email.trim() }
                 val passwordHash = PasswordHasher.hashForServer(password, emailTrim)
                 val user = userRepository.upsertAfterServerAuth(emailTrim, passwordHash, authData)
-
+                println("ID из сессии: ${authData.id}")
                 sessionManager.saveSession(
                     id = authData.id,
                     user = user,

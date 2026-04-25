@@ -70,10 +70,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     // Kotlin Serialization (для JSON)
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+    implementation("com.macasaet.fernet:fernet-java8:1.5.0")
 
     // Room Database
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.remote.creation.core)
 //    implementation(libs.cardview.v7)
     ksp(libs.androidx.room.compiler)
     

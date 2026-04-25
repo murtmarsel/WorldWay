@@ -39,6 +39,9 @@ class UserRepository(private val userDao: UserDao) {
     suspend fun getUserById(id: Long): User? {
         return userDao.getUserById(id)
     }
+    suspend fun updateUser(user: User){
+        userDao.update(user)
+    }
 
     /**
      * После успешной авторизации/регистрации на сервере синхронизируем пользователя в локальной БД.
@@ -55,9 +58,11 @@ class UserRepository(private val userDao: UserDao) {
             val updated = existing.copy(
                 password = passwordHash,
                 username = username,
+                tariff = authData.tariff,
                 emailConfirmed = authData.isConfirmed,
                 isNew = authData.isNew,
                 isAdmin = authData.isAdmin,
+                isActive = authData.isActive,
                 subsEndDate = subscriptionEnd
             )
             userDao.update(updated)
@@ -67,10 +72,12 @@ class UserRepository(private val userDao: UserDao) {
                 email = email,
                 password = passwordHash,
                 username = username,
+                tariff = authData.tariff,
                 subsEndDate = subscriptionEnd,
                 emailConfirmed = authData.isConfirmed,
                 isNew = authData.isNew,
-                isAdmin = authData.isAdmin
+                isAdmin = authData.isAdmin,
+                isActive = authData.isActive
             )
             val id = userDao.insert(newUser)
             userDao.getUserById(id) ?: newUser.copy(id = id)

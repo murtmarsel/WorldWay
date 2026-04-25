@@ -10,15 +10,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.remote.creation.first
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
+import ru.acestar.vpn.VpnApplication
+import ru.acestar.vpn.api.AuthApiService
 import ru.acestar.vpn.data.model.VpnConfigEntity
+import ru.acestar.vpn.data.database.AppDatabase
+import ru.acestar.vpn.data.dao.VpnServerConfigDao
 import ru.acestar.vpn.data.repository.SessionManager
+import ru.acestar.vpn.data.repository.UserRepository
 import ru.acestar.vpn.databinding.ActivityMainBinding
 import ru.acestar.vpn.vpn.OpenVpnManager
 import ru.acestar.vpn.vpn.VpnConnectionState
@@ -31,11 +38,17 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val GRAPH_WINDOW_MS = 60 * 60 * 1000L
+        const val EXTRA_GETTING_USER_DATA = "GETTING_USER_DATA"
     }
 
     private lateinit var binding: ActivityMainBinding
-    private lateinit var sessionManager: SessionManager  // ✅ lateinit вместо инициализации в поле
+    private lateinit var sessionManager: SessionManager
     private val viewModel: MainViewModel by viewModels()
+    private lateinit var vpnServerConfigDao: VpnServerConfigDao
+    private lateinit var authApiService: AuthApiService
+    private val userRepository by lazy {
+        UserRepository((application as VpnApplication).database.userDao())
+    }
     private val trafficSamples = ArrayDeque<TrafficChartView.TrafficPoint>()
     private var lastTrafficBytes = 0L
     private var lastTrafficTimestamp = 0L
@@ -55,19 +68,16 @@ class MainActivity : AppCompatActivity() {
     private val configSelectionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode != RESULT_OK){
-            return@registerForActivityResult
-        }
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
         val configId = result.data?.getLongExtra(ConfigSelectionActivity.EXTRA_SELECTED_CONFIG_ID, -1L) ?: -1L
-
         if (configId > 0) {
             lifecycleScope.launch {
                 val config = viewModel.getConfigById(configId)
-
+                val shortHost = shortHostLabel(config?.serverHost ?: "")
                 if (config != null) {
                     selectedConfigId = config.id
                     selectedConfigName = config.name
-                    loadConfigFromContent(config.configContent, config.name)
+                    loadConfigFromContent(config.configContent, shortHost)
                 }
             }
         }
@@ -88,21 +98,23 @@ class MainActivity : AppCompatActivity() {
         ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
 
-        // ✅ Инициализация SessionManager после super.onCreate
         sessionManager = SessionManager.getInstance(this)
+        authApiService = AuthApiService(sessionManager)
 
-        // ✅ Проверка авторизации с использованием lifecycleScope
         lifecycleScope.launch {
             val isLoggedIn = sessionManager.isLoggedIn()
             if (isLoggedIn) {
-                // Пользователь авторизован
-                println("Пользователь авторизован")
                 val user = sessionManager.getCurrentUser()
-                println(user)
+                println("EXTRA_GETTING_USER_DATA: ${intent.getBooleanExtra(EXTRA_GETTING_USER_DATA, false)}")
+                if(intent.getBooleanExtra(EXTRA_GETTING_USER_DATA, false)){
+                    authApiService.getUserData(user!!.email, sessionManager.getAccessToken(), userRepository)
+                }
+
+
+
+
                 user?.let { sessionManager.updateCurrentUser(it) }
             } else {
-                // Пользователь не авторизован
-                println("Пользователь не авторизован")
                 navigateToLogin()
                 return@launch
             }
@@ -111,13 +123,14 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        vpnServerConfigDao = AppDatabase.getDatabase(applicationContext).vpnServerConfigDao()
+
         setupUI()
         observeViewModel()
     }
 
     override fun onResume() {
         super.onResume()
-        // Снова показать напоминание после возврата с другого экрана (если условие всё ещё актуально)
         emailReminderDismissedForSession = false
         subscriptionReminderDismissedForSession = false
         viewModel.refreshUser()
@@ -267,7 +280,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 updateConnectionUI(state)
                 if (state == VpnConnectionState.DISCONNECTED || state == VpnConnectionState.CONNECTED) {
-                    updateServerInfoText()
+                    updateServerInfoText(false)
                 }
             }
         }
@@ -289,7 +302,9 @@ class MainActivity : AppCompatActivity() {
                     binding.tvSubscription.visibility = View.VISIBLE
                     if (user.hasActiveSubscription()) {
                         val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                        val endDate = dateFormat.format(user.subsEndDate)
+                        var endDate = dateFormat.format(user.subsEndDate)
+//                        println("Тариф пользователя: ${user.tariff}")
+                        if (user.tariff == "Unlimited") endDate = getString(R.string.subscription_active_unlimited)
                         binding.tvSubscription.text = getString(R.string.subscription_active, endDate)
                         binding.tvSubscription.setTextColor(
                             ContextCompat.getColor(this@MainActivity, R.color.connected)
@@ -317,7 +332,7 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     binding.btnConnect.isEnabled = loaded && viewModel.hasActiveSubscription()
                 }
-                updateServerInfoText()
+                updateServerInfoText(false)
             }
         }
 
@@ -327,7 +342,7 @@ class MainActivity : AppCompatActivity() {
                 val selectedDeleted = selectedConfigId != null && configs.none { it.id == selectedConfigId }
                 if (selectedDeleted) {
                     selectedConfigId = null
-                    selectedConfigName = "VPN Server"
+                    selectedConfigName = "Server"
                     viewModel.clearConfigLoaded()
                     binding.tvServerInfo.visibility = View.GONE
                     binding.tvStatusDetails.text = getString(R.string.no_config_selected)
@@ -406,7 +421,7 @@ class MainActivity : AppCompatActivity() {
             VpnConnectionState.ERROR -> {
                 binding.tvStatus.text = getString(R.string.status_error)
                 binding.tvStatus.setTextColor(ContextCompat.getColor(this, R.color.error))
-                binding.ivVpnIcon.setColorFilter(ContextCompat.getColor(this, R.color.error))
+                binding.ivVpnIcon.setImageResource(R.mipmap.ic_vpn_red_foreground)
                 binding.btnConnect.text = getString(R.string.btn_connect)
                 binding.btnConnect.isEnabled = viewModel.hasActiveSubscription() && viewModel.configLoaded.value
                 binding.btnAddConfig.isEnabled = true
@@ -485,11 +500,38 @@ class MainActivity : AppCompatActivity() {
         )
         if (success) {
             viewModel.onConfigLoaded()
-            showToast(R.string.config_loaded)
-            updateServerInfoText()
+//            showToast(R.string.config_loaded)
+            updateServerInfoText(false)
             binding.tvStatusDetails.text = getString(R.string.config_loaded)
         } else {
             showToast("Ошибка загрузки конфигурации")
+        }
+    }
+    private fun waitLoadServerConfigs(){
+        lifecycleScope.launch {
+            val result = viewModel.loadServerConfigsAndWait(1)
+
+            if (result) {
+                // Конфиги загружены, подключаемся
+                updateServerInfoText(true)
+                viewModel.onConfigLoaded()
+
+                when (currentConnectionState) {
+                    VpnConnectionState.CONNECTED,
+                    VpnConnectionState.CONNECTING,
+                    VpnConnectionState.DISCONNECTING -> {
+                        protocolReconnectPending = true
+                        viewModel.vpnManager.disconnect()
+                    }
+                    VpnConnectionState.DISCONNECTED,
+                    VpnConnectionState.ERROR -> {
+                        reconnectVpnIfPossible()
+                    }
+                }
+            } else {
+                delay(500)
+                waitLoadServerConfigs()
+            }
         }
     }
 
@@ -498,14 +540,24 @@ class MainActivity : AppCompatActivity() {
         val serverButtons = configs.filter { it.source == "server_placeholder" }.take(2)
 
         val buttons = mutableListOf<MaterialButton>()
+
+
         buttons += createServerButton().apply {
-            text = if (serverButtons.isNotEmpty()) serverButtons[0].name else getString(R.string.server_1)
-            setOnClickListener { showToast(R.string.subscription_stub) }
+            setOnClickListener {
+                if(viewModel.hasActiveSubscription()){
+                    waitLoadServerConfigs()
+                }else{
+                    showErrorDialog("Срок действия подписки истек")
+                }
+            }
         }
-        buttons += createServerButton().apply {
-            text = if (serverButtons.size > 1) serverButtons[1].name else getString(R.string.server_2)
-            setOnClickListener { showToast(R.string.subscription_stub) }
-        }
+//        buttons += createServerButton().apply {
+//            text = if (serverButtons.size > 1) serverButtons[1].name else getString(R.string.server_2)
+//            setOnClickListener {
+//                viewModel.tryConnectNextConfig()
+//                showToast(R.string.subscription_stub)
+//            }
+//        }
 
         val favoriteConfigs = configs
             .filter { it.isFavorite && it.configContent.isNotBlank() }
@@ -517,10 +569,18 @@ class MainActivity : AppCompatActivity() {
             buttons += createServerButton().apply {
                 text = "$shortHost $protocol"
 
-                applyQuickButtonState(isActive = favorite.id == selectedConfigId)
+
+                var isActive: Boolean;
+
+                if (favorite.id == selectedConfigId) isActive = true
+                else isActive = false
+
+
                 setOnClickListener {
+                    applyQuickButtonState(isActive)
+//                    showToast("fav id: ${favorite.id}, sel: ${selectedConfigId}")
                     selectedConfigId = favorite.id
-                    loadConfigFromContent(favorite.configContent, favorite.name)
+                    loadConfigFromContent(favorite.configContent, shortHost)
                     when (currentConnectionState) {
                         VpnConnectionState.CONNECTED,
                         VpnConnectionState.CONNECTING,
@@ -583,16 +643,21 @@ class MainActivity : AppCompatActivity() {
         viewModel.vpnManager.connect(this)
     }
 
-    private fun updateServerInfoText() {
+    private fun updateServerInfoText(isServer: Boolean) {
         val serverInfo = viewModel.vpnManager.getServerInfo() ?: return
         val protocol = viewModel.vpnManager.getCurrentProtocolLabel()
         binding.tvServerInfo.visibility = View.VISIBLE
-        binding.tvServerInfo.text = getString(
-            R.string.server_info_with_protocol,
-            serverInfo.first,
-            serverInfo.second,
-            protocol
-        )
+        if(isServer){
+            binding.tvServerInfo.text = getString(R.string.server_info_auto)
+        }
+        else{
+            binding.tvServerInfo.text = getString(
+                R.string.server_info_with_protocol,
+                serverInfo.first,
+                serverInfo.second,
+                protocol
+            )
+        }
     }
 
     private fun showToast(messageRes: Int) {
@@ -660,6 +725,23 @@ class MainActivity : AppCompatActivity() {
                 ContextCompat.getColor(this@MainActivity, R.color.disconnected)
             )
         }
+    }
+    private fun showErrorDialog(message: String) {
+        if (isFinishing || isDestroyed) {
+            return
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Ошибка")
+            .setMessage(message)
+            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+            .show()
+    }
+    private fun showSuccessDialog(message: String) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Успех")
+            .setMessage(message)
+            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+            .show()
     }
 
     private fun navigateToLogin() {

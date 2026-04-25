@@ -141,7 +141,9 @@ class SettingsActivity : AppCompatActivity() {
         // ✅ Очищаем сессию
         lifecycleScope.launch {
             try {
+
                 sessionManager.logout()
+                sessionManager.clearSession()
 
                 // Переходим на экран входа
                 val intent = Intent(this@SettingsActivity, LoginActivity::class.java).apply {

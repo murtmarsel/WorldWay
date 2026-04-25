@@ -1,6 +1,7 @@
 package ru.acestar.vpn.api
 
 import android.util.Log
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
@@ -8,11 +9,16 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import ru.acestar.vpn.VpnApplication
+import ru.acestar.vpn.data.dao.UserDao
 import ru.acestar.vpn.data.model.AuthData
 import ru.acestar.vpn.data.model.RegRequest
 import ru.acestar.vpn.data.model.ConfirmEmail
+import ru.acestar.vpn.data.model.CurrentSession
+import ru.acestar.vpn.data.model.User
 import ru.acestar.vpn.data.model.admin.UserConfigFile
 import ru.acestar.vpn.data.repository.SessionManager
+import ru.acestar.vpn.data.repository.UserRepository
 import ru.acestar.vpn.utils.CryptoHelper
 import ru.acestar.vpn.utils.PasswordHasher
 import java.util.Date
@@ -29,6 +35,8 @@ class AuthApiService(private val sessionManager: SessionManager) {
         val token = sessionManager.getAccessToken()
         return token
     }
+
+
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
     private var pendinLoginDate: Date = Date()
@@ -84,9 +92,11 @@ class AuthApiService(private val sessionManager: SessionManager) {
                     json.has("data") && !json.isNull("data") -> json.getJSONObject("data")
                     else -> json
                 }
-                println("Содержимое data: ${data.toString()}")
+//                println("Содержимое data: ${data.toString()}")
 
                 val authData = parseAuthDataFromJson(data, email)
+                getClientFilesList(email, authData.token)
+//                println("Данные для получения файлов конф: ${email}, ${authData.token}")
                 Result.success(authData)
 
 
@@ -170,6 +180,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
             Result.failure(e)
         }
     }
+
 
     /** После первой успешной оплаты: isNew = 0 на сервере и локально. */
     suspend fun markUserNotNew(accessToken: String?): Result<Unit> = withContext(Dispatchers.IO) {
@@ -278,19 +289,29 @@ class AuthApiService(private val sessionManager: SessionManager) {
         }
     }
 
-    suspend fun getClientFilesList(clientName: Long): Result<List<UserConfigFile>> =
+    suspend fun getClientFilesList(email: String, token: String?): Result<List<UserConfigFile>> =
         withContext(Dispatchers.IO) {
             try {
-                val token = getToken()
-                    ?: return@withContext Result.failure(
-                        Exception("Нет токена пользователя. Войдите в приложение (JWT в сессии).")
+                println("Получение файлов конфигурации")
+                println("Текущий токен: ${token}")
+                token?: return@withContext Result.failure(
+
+                        Exception("Нет токена для получения конфигурации.")
                     )
 
-                Log.d("AdminApiService", "📤 Getting configs list for user id: $clientName")
+                val email = JSONObject().apply{
+                    put("email", email)
+                }
+                val encryptedEmail = CryptoHelper.encryptData(email.toString(), token)
+
+                val jsonBody = JSONObject().apply {
+                    put("data", encryptedEmail)
+                }
+//                println("Передаваемые данные для получения файлов: ${jsonBody}")
 
                 val request = Request.Builder()
-                    .url("$baseUrl/api/users/$clientName/configs")
-                    .get()
+                    .url("$baseUrl/api/v1/users/configs")
+                    .post(jsonBody.toString().toRequestBody(jsonMediaType))
                     .addHeader("Authorization", "Bearer $token")
                     .addHeader("Content-Type", "application/json")
                     .addHeader("Accept", "application/json")
@@ -298,7 +319,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
 
                 client.newCall(request).execute().use { response ->
                     val responseBody = response.body?.string()
-                    Log.d("AdminApiService", "📥 Response code: ${response.code}")
+                    println("📥 Response code: ${response.code}")
 
                     if (!response.isSuccessful) {
                         return@withContext Result.failure(
@@ -325,7 +346,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
                     if (encrypted && encryptedData != null) {
                         // ✅ 1. Расшифровываем данные
                         val decryptedJson = CryptoHelper.decryptData(encryptedData, token)
-                        Log.d("AdminApiService", "🔓 Decrypted data: $decryptedJson")
+//                        println("🔓 Decrypted data: $decryptedJson")
 
                         // ✅ 2. Парсим расшифрованный JSON
                         val filesData = JSONObject(decryptedJson)
@@ -349,14 +370,128 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             )
                             filesList.add(file)
                         }
-
+//                        println(filesList.toString())
                         Result.success(filesList)
                     } else {
                         Result.failure(Exception("Expected encrypted data"))
                     }
                 }
             } catch (e: Exception) {
-                Log.e("AdminApiService", "Error getting files list", e)
+//                Log.d("Error getting files list $e")
+                println("Ошибка получения файлов: ${e}")
+                Result.failure(e)
+            }
+        }
+
+    suspend fun getUserData(email: String, token: String?, userRepository: UserRepository): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                println("Обновление данных пользователя")
+                val accessToken = token ?: return@withContext Result.failure(
+                    Exception("Нет токена для получения конфигурации.")
+                )
+                println("Текущий токен: $accessToken")
+                val emailJSON = JSONObject().apply{
+                    put("email", email)
+                }
+                val encryptedEmail = CryptoHelper.encryptData(emailJSON.toString(), accessToken)
+
+                val jsonBody = JSONObject().apply {
+                    put("data", encryptedEmail)
+                }
+                println("Передаваемые данные для получения файлов: ${jsonBody}")
+
+                val request = Request.Builder()
+                    .url("$baseUrl/api/v1/login/update")
+                    .post(jsonBody.toString().toRequestBody(jsonMediaType))
+                    .addHeader("Authorization", "Bearer $accessToken")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("Accept", "application/json")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val responseBody = response.body?.string()
+                    println("📥 Response code: ${response.code}")
+
+                    if (!response.isSuccessful) {
+                        return@withContext Result.failure(
+                            Exception("HTTP ${response.code}: ${response.message}")
+                        )
+                    }
+
+                    if (responseBody.isNullOrEmpty()) {
+                        return@withContext Result.failure(Exception("Empty response"))
+                    }
+
+                    // Парсим JSON ответ
+                    val jsonResponse = JSONObject(responseBody)
+                    val success = jsonResponse.optBoolean("success", false)
+
+                    if (!success) {
+                        val error = jsonResponse.optString("error", "Unknown error")
+                        return@withContext Result.failure(Exception(error))
+                    }
+
+                    val encrypted = jsonResponse.optBoolean("enc", false)
+                    val rawData = jsonResponse.optString("data", null)
+
+                    println(rawData)
+                    if (rawData == null || rawData === JSONObject.NULL) {
+                        return@withContext Result.failure(Exception("Ответ без поля data"))
+                    }
+
+                    if (encrypted && rawData != null) {
+                        // ✅ 1. Расшифровываем данные
+                        val decryptedJson = CryptoHelper.decryptData(rawData, token)
+
+                        println("🔓 Decrypted data: $decryptedJson")
+
+                        // ✅ 2. Парсим расшифрованный JSON
+                        val userData = JSONObject(decryptedJson)
+                        val user = User(
+                            id = userData.optLong("user_id"),
+                            email = email,
+                            tariff = userData.optString("tariff"),
+                            emailConfirmed = userData.optBoolean("isConfirmed"),
+                            isNew = userData.optBoolean("isNew"),
+                            isActive = userData.optBoolean("isActive")
+                        )
+
+                        val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+                        val subsEndDate = userData.optString("subsEndDate")
+                        val date: Date = format.parse(subsEndDate)!!
+                        val subsEndDateTimestamp: Long = date.time
+
+                        val tokenExpiry = userData.optString("tokenExpiry")
+                        val dateToken: Date = format.parse(tokenExpiry)!!
+                        val tokenExpiryTimestamp: Long = dateToken.time
+
+                        val createdAtExpiry = userData.optString("createdAt")
+                        val createdAtToken: Date = format.parse(createdAtExpiry)!!
+                        val createdAtTimestamp: Long = createdAtToken.time
+
+                        val session = CurrentSession(
+                            userId = user.id,
+                            email = email,
+                            tariff = user.tariff,
+                            subsEndDate = subsEndDateTimestamp,
+                            token = accessToken,
+                            isConfirmed = user.emailConfirmed,
+                            isActive = user.isActive,
+                            tokenExpiry = tokenExpiryTimestamp,
+                            createdAt = createdAtTimestamp
+                        )
+
+                        userRepository.updateUser(user)
+                        sessionManager.updateCurrentSession(session)
+                    }
+
+                    return@withContext Result.success(true)
+                }
+            } catch (e: Exception) {
+//                Log.d("Error getting files list $e")
+                println("Ошибка обновления данных: ${e}")
                 Result.failure(e)
             }
         }
@@ -400,6 +535,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
             isNew = data.optBoolean("isNew"),
             isActive = data.optBoolean(("isActive")),
             token = token,
+            tariff = data.optString(("tariff")),
             subsEndDate = subsEndDateTimestamp,
             isAdmin = data.optBoolean("isAdmin")
         )
@@ -418,6 +554,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
         }
         return null
     }
+
 }
 
 //private fun JSONObject.optLong(name: String, fallback: String): Long {

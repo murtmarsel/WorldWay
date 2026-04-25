@@ -118,13 +118,18 @@ class ConfigSelectionActivity : AppCompatActivity() {
             finish()
         }
     }
-
+    private fun shortHostLabel(host: String): String {
+        val parts = host.split(".")
+        if (parts.size >= 2) return "${parts[0]}.${parts[1]}"
+        return host.take(10)
+    }
     private fun saveConfigFromUri(uri: Uri) {
         try {
             contentResolver.openInputStream(uri)?.use { inputStream ->
                 val configText = inputStream.bufferedReader().use { it.readText() }
                 val host = extractServerHost(configText).ifBlank { "-" }
                 val fileName = resolveFileName(uri)
+                val shortHost = shortHostLabel(host)
                 val name = extractFriendlyName(configText)
                     .ifBlank { fileName.substringBeforeLast(".") }
                     .ifBlank { host }
