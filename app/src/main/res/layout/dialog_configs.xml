@@ -9,7 +9,7 @@
         android:layout_height="wrap_content"
         android:padding="12dp"
         android:text="@string/admin_configs_title"
-        android:textSize="14sp"
+        android:textSize="14dp"
         android:textStyle="bold" />
 
     <View

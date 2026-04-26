@@ -448,14 +448,6 @@ class AuthApiService(private val sessionManager: SessionManager) {
 
                         // ✅ 2. Парсим расшифрованный JSON
                         val userData = JSONObject(decryptedJson)
-                        val user = User(
-                            id = userData.optLong("user_id"),
-                            email = email,
-                            tariff = userData.optString("tariff"),
-                            emailConfirmed = userData.optBoolean("isConfirmed"),
-                            isNew = userData.optBoolean("isNew"),
-                            isActive = userData.optBoolean("isActive")
-                        )
 
                         val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
 
@@ -471,6 +463,18 @@ class AuthApiService(private val sessionManager: SessionManager) {
                         val createdAtToken: Date = format.parse(createdAtExpiry)!!
                         val createdAtTimestamp: Long = createdAtToken.time
 
+
+                        val user = User(
+                            id = userData.optLong("user_id"),
+                            email = email,
+                            tariff = userData.optString("tariff"),
+                            emailConfirmed = userData.optBoolean("isConfirmed"),
+                            isNew = userData.optBoolean("isNew"),
+                            isActive = userData.optBoolean("isActive"),
+                            isAdmin = userData.optBoolean("isAdmin"),
+                            subsEndDate = subsEndDateTimestamp
+                        )
+
                         val session = CurrentSession(
                             userId = user.id,
                             email = email,
@@ -482,9 +486,24 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             tokenExpiry = tokenExpiryTimestamp,
                             createdAt = createdAtTimestamp
                         )
+                        println("Новая сессия для сохранения: ${session}")
 
                         userRepository.updateUser(user)
                         sessionManager.updateCurrentSession(session)
+
+                        println("Текущая дата тарифа: ${session.subsEndDate}")
+                        sessionManager.saveSession(
+                            id = 1,
+                            user = user,
+                            token = session.token,
+                            email = session.email,
+                            tariff = session.tariff,
+                            subsEndDate = session.subsEndDate,
+                            isConfirmed = session.isConfirmed,
+                            isActive = session.isActive,
+                            createdAt = session.createdAt
+                        )
+                        sessionManager.updateCurrentUser(user)
                     }
 
                     return@withContext Result.success(true)

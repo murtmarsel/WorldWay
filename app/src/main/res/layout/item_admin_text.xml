@@ -14,6 +14,6 @@
         android:layout_height="wrap_content"
         android:padding="12dp"
         android:textColor="@color/text_primary"
-        android:textSize="13sp"
+        android:textSize="13dp"
         tools:text="Строка" />
 </com.google.android.material.card.MaterialCardView>

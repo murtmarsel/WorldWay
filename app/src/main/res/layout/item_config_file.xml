@@ -41,7 +41,7 @@
                     android:ellipsize="end"
                     android:maxLines="2"
                     android:textColor="@color/text_primary"
-                    android:textSize="12sp"
+                    android:textSize="12dp"
                     android:textStyle="bold"
                     tools:text="client1.ovpn" />
 
@@ -53,7 +53,7 @@
                     android:ellipsize="end"
                     android:maxLines="3"
                     android:textColor="@color/text_secondary"
-                    android:textSize="10sp"
+                    android:textSize="10dp"
                     tools:text="/etc/openvpn/clients/client1.ovpn" />
 
                 <TextView
@@ -62,7 +62,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:textColor="@color/text_secondary"
-                    android:textSize="10sp"
+                    android:textSize="10dp"
                     tools:text="Размер: 12.5 KB" />
 
                 <TextView
@@ -71,7 +71,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:textColor="@color/text_secondary"
-                    android:textSize="10sp"
+                    android:textSize="10dp"
                     tools:text="Тип: OpenVPN" />
 
                 <TextView
@@ -80,7 +80,7 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
                     android:textColor="@color/text_secondary"
-                    android:textSize="10sp"
+                    android:textSize="10dp"
                     tools:text="Категория: default" />
 
             </LinearLayout>

@@ -9,7 +9,7 @@
         android:layout_height="wrap_content"
         android:padding="16dp"
         android:text="@string/admin_logs_title"
-        android:textSize="18sp"
+        android:textSize="18dp"
         android:textStyle="bold" />
 
     <View

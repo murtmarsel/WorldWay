@@ -9,6 +9,27 @@ interface UserDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(user: User): Long
 
+
+//    @PrimaryKey(autoGenerate = true)
+//    val id: Long = 0,
+//    val email: String,
+//    val password: String? = null,
+//    val createdAt: Long = System.currentTimeMillis(),
+//    val tariff: String = "Trial",
+//    val subsEndDate: Long? = 0,
+//    val isActive: Boolean = true,
+//    val emailConfirmed: Boolean = false,
+//    val isNew: Boolean = true,
+//    val isAdmin: Boolean = false,
+//    val isLoggedIn: Boolean = false,
+//    val username: String? = null
+    @Query("""
+        UPDATE users
+        SET  email = :email, emailConfirmed = :isConfirmed, tariff = :tariff, 
+            isNew = :isNew, isActive = :isActive, subsEndDate = :subsEndDate
+        WHERE id = :id""")
+    suspend fun updateUser(id: Long, email: String?, isConfirmed: Boolean,
+                           tariff: String, isNew: Boolean, isActive: Boolean, subsEndDate: Long?)
     @Update
     suspend fun update(user: User)
 

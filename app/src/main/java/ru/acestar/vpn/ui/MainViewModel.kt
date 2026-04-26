@@ -86,14 +86,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun loadCurrentUser() {
         viewModelScope.launch {
             val user = sessionManager.getCurrentUser()
-            val userId = user?.id ?: -1
+            val userId = user?.id ?: -1L
             currentUserId = userId
             observeVpnConfigs()
             ensureServerPlaceholders()
-            if (userId != -1L) {
-                val user = userRepository.getUserById(userId)
+        }
+
+        // Подписываемся на SessionManager — единственный источник правды
+        viewModelScope.launch {
+            sessionManager.currentUser.collectLatest { user ->
                 _currentUser.value = user
-                sessionManager.updateCurrentUser(user)
             }
         }
     }

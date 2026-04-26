@@ -40,7 +40,8 @@ class UserRepository(private val userDao: UserDao) {
         return userDao.getUserById(id)
     }
     suspend fun updateUser(user: User){
-        userDao.update(user)
+        userDao.updateUser(user.id, user.email, user.emailConfirmed, user.tariff,
+                                user.isNew, user.isActive, user.subsEndDate)
     }
 
     /**

@@ -21,8 +21,32 @@ interface SessionDao {
 
     @Update
     suspend fun updateSession(session: Session)
-    @Update
-    suspend fun updateCurrentSession(session: CurrentSession)
+//    @Update
+//    suspend fun updateCurrentSession(session: CurrentSession)
+
+    @Query("""UPDATE current_session
+                        SET userId = :userId, email = :email, tariff = :tariff, subsEndDate = :subsEndDate,
+                            tokenExpiry = :tokenExpiry, isConfirmed = :isConfirmed, isActive = :isActive,
+                            isAdmin = :isAdmin, isNew = :isNew
+                        WHERE id = 1 """)
+    suspend fun updateCurrentSession(userId: Long, email: String, tariff: String, subsEndDate: Long,
+                                     tokenExpiry: Long, isConfirmed: Boolean, isActive: Boolean, isAdmin: Boolean,
+                                     isNew: Boolean)
+
+//    @PrimaryKey
+//    val id: Int = 1,
+//    val userId: Long,
+//    val email: String,
+//    val tariff: String,
+//    val subsEndDate: Long,
+//    val token: String?,
+//    val tokenExpiry: Long,
+//    val isConfirmed: Boolean,
+//    val isActive: Boolean,
+//    val isAdmin: Boolean = false,
+//    val isNew: Boolean = true,
+//    val createdAt: Long
+
 
     @Query("UPDATE sessions SET isActive = 0 WHERE userId = :userId")
     suspend fun deactivateAllUserSessions(userId: Long)

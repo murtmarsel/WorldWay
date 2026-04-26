@@ -32,7 +32,7 @@
             android:layout_marginTop="16dp"
             android:text="@string/register"
             android:textColor="@color/primary"
-            android:textSize="24sp"
+            android:textSize="24dp"
             android:textStyle="bold"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
@@ -126,7 +126,7 @@
                     android:gravity="center"
                     android:text="@string/register_with_agreement"
                     android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
+                    android:textSize="12dp" />
 
                 <TextView
                     android:id="@+id/tvPrivacyPolicy"
@@ -151,7 +151,7 @@
             android:gravity="center"
             android:text="При регистрации вы получаете\n7 дней бесплатного доступа"
             android:textColor="@color/text_secondary"
-            android:textSize="12sp"
+            android:textSize="12dp"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/cardRegister" />

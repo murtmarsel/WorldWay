@@ -101,32 +101,40 @@ class MainActivity : AppCompatActivity() {
         sessionManager = SessionManager.getInstance(this)
         authApiService = AuthApiService(sessionManager)
 
+        // ← Сначала инициализируем UI и подписки
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+        vpnServerConfigDao = AppDatabase.getDatabase(applicationContext).vpnServerConfigDao()
+        setupUI()
+        observeViewModel()
+
+        // ← Потом запускаем корутину с авторизацией
         lifecycleScope.launch {
             val isLoggedIn = sessionManager.isLoggedIn()
-            if (isLoggedIn) {
-                val user = sessionManager.getCurrentUser()
-                println("EXTRA_GETTING_USER_DATA: ${intent.getBooleanExtra(EXTRA_GETTING_USER_DATA, false)}")
-                if(intent.getBooleanExtra(EXTRA_GETTING_USER_DATA, false)){
-                    authApiService.getUserData(user!!.email, sessionManager.getAccessToken(), userRepository)
-                }
-
-
-
-
-                user?.let { sessionManager.updateCurrentUser(it) }
-            } else {
+            if (!isLoggedIn) {
                 navigateToLogin()
                 return@launch
             }
+
+            val user = sessionManager.getCurrentUser() ?: run {
+                navigateToLogin()
+                return@launch
+            }
+
+            if (intent.getBooleanExtra(EXTRA_GETTING_USER_DATA, false)) {
+                val result = authApiService.getUserData(
+                    user.email,
+                    sessionManager.getAccessToken(),
+                    userRepository
+                )
+                if (result.isSuccess) {
+                    // После успешного обновления — явно триггерим обновление ViewModel
+
+                }
+            } else {
+                sessionManager.updateCurrentUser(user)
+            }
         }
-
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        vpnServerConfigDao = AppDatabase.getDatabase(applicationContext).vpnServerConfigDao()
-
-        setupUI()
-        observeViewModel()
     }
 
     override fun onResume() {
@@ -300,6 +308,10 @@ class MainActivity : AppCompatActivity() {
             viewModel.currentUser.collectLatest { user ->
                 if (user != null) {
                     binding.tvSubscription.visibility = View.VISIBLE
+                    val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+                    var endDate = dateFormat.format(user.subsEndDate)
+                    println("Активная подписка: ${endDate}")
+                    println("Активный пользователь: ${user}")
                     if (user.hasActiveSubscription()) {
                         val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
                         var endDate = dateFormat.format(user.subsEndDate)
@@ -543,6 +555,7 @@ class MainActivity : AppCompatActivity() {
 
 
         buttons += createServerButton().apply {
+            text = "Авто"
             setOnClickListener {
                 if(viewModel.hasActiveSubscription()){
                     waitLoadServerConfigs()

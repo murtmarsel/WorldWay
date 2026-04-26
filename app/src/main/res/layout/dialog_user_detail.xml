@@ -10,7 +10,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/admin_user_details"
-        android:textSize="20sp"
+        android:textSize="20dp"
         android:textStyle="bold"
         android:layout_marginBottom="16dp" />
 
@@ -31,42 +31,42 @@
                 android:id="@+id/tvUserId"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="14sp"
+                android:textSize="14dp"
                 android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/tvUserEmail"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="16sp"
+                android:textSize="16dp"
                 android:layout_marginTop="8dp" />
 
             <TextView
                 android:id="@+id/tvUserTariff"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="14sp"
+                android:textSize="14dp"
                 android:layout_marginTop="4dp" />
 
             <TextView
                 android:id="@+id/tvUserStatus"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="14sp"
+                android:textSize="14dp"
                 android:layout_marginTop="4dp" />
 
             <TextView
                 android:id="@+id/tvUserEmailConfirmed"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="14sp"
+                android:textSize="14dp"
                 android:layout_marginTop="4dp" />
 
             <TextView
                 android:id="@+id/tvUserCreated"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="12sp"
+                android:textSize="12dp"
                 android:textColor="@color/text_secondary"
                 android:layout_marginTop="8dp" />
 
@@ -78,7 +78,7 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/admin_actions"
-        android:textSize="16sp"
+        android:textSize="16dp"
         android:textStyle="bold"
         android:layout_marginBottom="12dp" />
 

@@ -47,7 +47,7 @@ object CryptoHelper {
             throw Exception("Encryption failed: ${e.message}")
         }
     }
-    fun decryptDataOld(encryptedBase64: String, token: String): String {
+    fun decryptData(encryptedBase64: String, token: String): String {
         return try {
             val encryptedData = Base64.decode(encryptedBase64, Base64.DEFAULT)
 
@@ -67,7 +67,7 @@ object CryptoHelper {
             throw Exception("Decryption failed: ${e.message}")
         }
     }
-    fun decryptData(encryptedBase64: String, token: String): String {
+    fun decryptDataOld(encryptedBase64: String, token: String): String {
         return try {
             println("========== DECRYPT DEBUG START ==========")
 

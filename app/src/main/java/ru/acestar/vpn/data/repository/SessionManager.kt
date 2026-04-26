@@ -68,8 +68,13 @@ class SessionManager private constructor(
         }
     }
 
-    suspend fun updateCurrentSession(session: CurrentSession){
-        sessionDao.updateCurrentSession(session)
+    suspend fun updateCurrentSession(currentSession: CurrentSession){
+        println("Текущая сессия: ${currentSession.toString()}")
+        sessionDao.updateCurrentSession(currentSession.userId, currentSession.email,
+                                        currentSession.tariff, currentSession.subsEndDate,
+                                        currentSession.tokenExpiry, currentSession.isConfirmed,
+                                        currentSession.isActive, currentSession.isAdmin,
+                                        currentSession.isNew)
     }
 
     suspend fun saveSession(
@@ -159,7 +164,7 @@ class SessionManager private constructor(
 
     suspend fun getAccessToken(): String? {
         val session = sessionDao.getCurrentSessionSync()
-        println("Текущая сессия: ${session.toString()}")
+
         return session?.token
     }
 

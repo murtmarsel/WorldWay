@@ -172,7 +172,7 @@
                     android:layout_marginTop="6dp"
                     android:text="@string/toast_notifications_hint"
                     android:textColor="@color/text_secondary"
-                    android:textSize="12sp" />
+                    android:textSize="12dp" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSystemNotifications"
