@@ -474,6 +474,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             isAdmin = userData.optBoolean("isAdmin"),
                             subsEndDate = subsEndDateTimestamp
                         )
+                        println("ISADMIN: ${user.isAdmin}")
 
                         val session = CurrentSession(
                             userId = user.id,
@@ -484,7 +485,8 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             isConfirmed = user.emailConfirmed,
                             isActive = user.isActive,
                             tokenExpiry = tokenExpiryTimestamp,
-                            createdAt = createdAtTimestamp
+                            createdAt = createdAtTimestamp,
+                            isAdmin = user.isAdmin
                         )
                         println("Новая сессия для сохранения: ${session}")
 

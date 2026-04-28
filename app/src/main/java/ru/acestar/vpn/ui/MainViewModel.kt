@@ -54,7 +54,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         /** Показать напоминание о подписке, если осталось меньше 7 дней. */
-        const val SUBSCRIPTION_WARN_MS = 7L * 24L * 60L * 60L * 1000L
+        const val SUBSCRIPTION_WARN_MS = 1L * 24L * 60L * 60L * 1000L
     }
 
 

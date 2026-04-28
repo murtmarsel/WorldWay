@@ -1,9 +1,14 @@
 package ru.acestar.vpn.ui
 
+import android.animation.AnimatorSet
+import android.animation.ObjectAnimator
 import android.content.Intent
 import android.os.Bundle
 import android.text.format.Formatter
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
+import android.widget.LinearLayout
 import android.widget.Toast
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private val viewModel: MainViewModel by viewModels()
     private lateinit var vpnServerConfigDao: VpnServerConfigDao
     private lateinit var authApiService: AuthApiService
+    private var isServerConfigs: Boolean = false
     private val userRepository by lazy {
         UserRepository((application as VpnApplication).database.userDao())
     }
@@ -77,6 +83,7 @@ class MainActivity : AppCompatActivity() {
                 if (config != null) {
                     selectedConfigId = config.id
                     selectedConfigName = config.name
+                    isServerConfigs = false
                     loadConfigFromContent(config.configContent, shortHost)
                 }
             }
@@ -168,8 +175,8 @@ class MainActivity : AppCompatActivity() {
             configSelectionLauncher.launch(
                 Intent(this, ConfigSelectionActivity::class.java)
                     .apply {
-                    putExtra(ConfigSelectionActivity.EXTRA_ACTIVE_CONFIG_ID, selectedConfigId ?: -1L)
-                }
+                        putExtra(ConfigSelectionActivity.EXTRA_ACTIVE_CONFIG_ID, selectedConfigId ?: -1L)
+                    }
             )
         }
 
@@ -209,7 +216,7 @@ class MainActivity : AppCompatActivity() {
 
         val needEmail = !user.emailConfirmed
         val needSub =
-            !user.hasActiveSubscription() || user.subscriptionExpiresWithin(MainViewModel.SUBSCRIPTION_WARN_MS)
+            !user.hasActiveSubscription() || user.subscriptionExpiresWithin(MainViewModel.SUBSCRIPTION_WARN_MS) && (user.tariff != "Unlimited")
 
         if (!needEmail) emailReminderDismissedForSession = false
         if (!needSub) subscriptionReminderDismissedForSession = false
@@ -218,6 +225,7 @@ class MainActivity : AppCompatActivity() {
 
         if (needSub && !subscriptionReminderDismissedForSession) {
             if (subscriptionReminderDialog?.isShowing != true) {
+
                 val msgRes = if (user.hasActiveSubscription()) {
                     R.string.banner_subscription_expires_soon
                 } else {
@@ -288,30 +296,30 @@ class MainActivity : AppCompatActivity() {
                 }
                 updateConnectionUI(state)
                 if (state == VpnConnectionState.DISCONNECTED || state == VpnConnectionState.CONNECTED) {
-                    updateServerInfoText(false)
+                    updateServerInfoText()
                 }
             }
         }
 
-        lifecycleScope.launch {
-            viewModel.statusMessage.collectLatest { message ->
-                val normalized = message.replace(",", " ").trim()
-                if (normalized.isNotEmpty() &&
-                    !(currentConnectionState == VpnConnectionState.CONNECTED && normalized.equals(getString(R.string.status_connected), ignoreCase = true))
-                ) {
-                    binding.tvStatusDetails.text = normalized
-                }
-            }
-        }
+//        lifecycleScope.launch {
+//            viewModel.statusMessage.collectLatest { message ->
+//                val normalized = message.replace(",", " ").trim()
+//                if (normalized.isNotEmpty() &&
+//                    !(currentConnectionState == VpnConnectionState.CONNECTED && normalized.equals(getString(R.string.status_connected), ignoreCase = true))
+//                ) {
+//                    binding.tvStatusDetails.text = normalized
+//                }
+//            }
+//        }
 
         lifecycleScope.launch {
             viewModel.currentUser.collectLatest { user ->
                 if (user != null) {
                     binding.tvSubscription.visibility = View.VISIBLE
-                    val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                    var endDate = dateFormat.format(user.subsEndDate)
-                    println("Активная подписка: ${endDate}")
-                    println("Активный пользователь: ${user}")
+//                    val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+//                    var endDate = dateFormat.format(user.subsEndDate)
+//                    println("Активная подписка: ${endDate}")
+//                    println("Активный пользователь: ${user}")
                     if (user.hasActiveSubscription()) {
                         val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
                         var endDate = dateFormat.format(user.subsEndDate)
@@ -321,7 +329,7 @@ class MainActivity : AppCompatActivity() {
                         binding.tvSubscription.setTextColor(
                             ContextCompat.getColor(this@MainActivity, R.color.connected)
                         )
-                        binding.btnConnect.isEnabled = viewModel.configLoaded.value
+                        binding.btnConnect.isEnabled = viewModel.configLoaded.value || viewModel.connectionState.value == VpnConnectionState.CONNECTED
                     } else {
                         binding.tvSubscription.text = getString(R.string.subscription_expired)
                         binding.tvSubscription.setTextColor(
@@ -337,14 +345,14 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             viewModel.configLoaded.collectLatest { loaded ->
                 if (loaded && viewModel.connectionState.value == VpnConnectionState.DISCONNECTED) {
-                    binding.tvStatusDetails.text = getString(R.string.config_loaded)
+                    showToast(getString(R.string.config_loaded))
                 }
                 if (viewModel.connectionState.value == VpnConnectionState.DISCONNECTED ||
                     viewModel.connectionState.value == VpnConnectionState.ERROR
                 ) {
                     binding.btnConnect.isEnabled = loaded && viewModel.hasActiveSubscription()
                 }
-                updateServerInfoText(false)
+                updateServerInfoText()
             }
         }
 
@@ -357,7 +365,6 @@ class MainActivity : AppCompatActivity() {
                     selectedConfigName = "Server"
                     viewModel.clearConfigLoaded()
                     binding.tvServerInfo.visibility = View.GONE
-                    binding.tvStatusDetails.text = getString(R.string.no_config_selected)
                     if (currentConnectionState == VpnConnectionState.CONNECTED ||
                         currentConnectionState == VpnConnectionState.CONNECTING ||
                         currentConnectionState == VpnConnectionState.DISCONNECTING
@@ -421,7 +428,6 @@ class MainActivity : AppCompatActivity() {
                 binding.btnConnect.isEnabled = true
                 binding.btnAddConfig.isEnabled = false
                 binding.btnConfigList.isEnabled = false
-                binding.tvStatusDetails.text = ""
                 binding.loadingOverlay.visibility = View.GONE
             }
 
@@ -513,8 +519,8 @@ class MainActivity : AppCompatActivity() {
         if (success) {
             viewModel.onConfigLoaded()
 //            showToast(R.string.config_loaded)
-            updateServerInfoText(false)
-            binding.tvStatusDetails.text = getString(R.string.config_loaded)
+            updateServerInfoText()
+            showToast(getString(R.string.config_loaded))
         } else {
             showToast("Ошибка загрузки конфигурации")
         }
@@ -525,7 +531,7 @@ class MainActivity : AppCompatActivity() {
 
             if (result) {
                 // Конфиги загружены, подключаемся
-                updateServerInfoText(true)
+                updateServerInfoText()
                 viewModel.onConfigLoaded()
 
                 when (currentConnectionState) {
@@ -555,8 +561,12 @@ class MainActivity : AppCompatActivity() {
 
 
         buttons += createServerButton().apply {
+            tag = "auto"
             text = "Авто"
             setOnClickListener {
+                updateAllServerButtonsToDefault()
+                updateServerButtonState("auto", ServerButtonState.ACTIVE)
+                isServerConfigs = true
                 if(viewModel.hasActiveSubscription()){
                     waitLoadServerConfigs()
                 }else{
@@ -580,6 +590,7 @@ class MainActivity : AppCompatActivity() {
             val protocol = extractProtocolLabel(favorite.configContent)
             val shortHost = shortHostLabel(favorite.serverHost)
             buttons += createServerButton().apply {
+                tag = favorite.id
                 text = "$shortHost $protocol"
 
 
@@ -590,9 +601,11 @@ class MainActivity : AppCompatActivity() {
 
 
                 setOnClickListener {
-                    applyQuickButtonState(isActive)
-//                    showToast("fav id: ${favorite.id}, sel: ${selectedConfigId}")
+                    // Сбрасываем все кнопки в DEFAULT, выделяем нажатую
+                    updateAllServerButtonsToDefault()
+                    updateServerButtonState(favorite.id, ServerButtonState.ACTIVE)
                     selectedConfigId = favorite.id
+                    isServerConfigs = false
                     loadConfigFromContent(favorite.configContent, shortHost)
                     when (currentConnectionState) {
                         VpnConnectionState.CONNECTED,
@@ -656,11 +669,11 @@ class MainActivity : AppCompatActivity() {
         viewModel.vpnManager.connect(this)
     }
 
-    private fun updateServerInfoText(isServer: Boolean) {
+    private fun updateServerInfoText() {
         val serverInfo = viewModel.vpnManager.getServerInfo() ?: return
         val protocol = viewModel.vpnManager.getCurrentProtocolLabel()
         binding.tvServerInfo.visibility = View.VISIBLE
-        if(isServer){
+        if(isServerConfigs){
             binding.tvServerInfo.text = getString(R.string.server_info_auto)
         }
         else{
@@ -719,26 +732,190 @@ class MainActivity : AppCompatActivity() {
             )
             setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
             textSize = 14f
+            applyButtonPressAnimation()
         }
     }
 
-    private fun MaterialButton.applyQuickButtonState(isActive: Boolean) {
-        if (isActive) {
-            setBackgroundColor(ContextCompat.getColor(this@MainActivity, R.color.server_button_selected))
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            strokeWidth = (2 * resources.displayMetrics.density).toInt()
-            strokeColor = android.content.res.ColorStateList.valueOf(
-                ContextCompat.getColor(this@MainActivity, R.color.primary)
-            )
-        } else {
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
-            strokeWidth = (1 * resources.displayMetrics.density).toInt()
-            strokeColor = android.content.res.ColorStateList.valueOf(
-                ContextCompat.getColor(this@MainActivity, R.color.disconnected)
-            )
+    /**
+     * Навешивает анимацию нажатия (scale down) и удерживания (pulse) на кнопку.
+     * - ACTION_DOWN: плавно уменьшает до 0.93 за 100мс
+     * - ACTION_UP / ACTION_CANCEL: возвращает к 1.0 за 150мс
+     * Удерживание имитируется через повторяющийся pulse-аниматор,
+     * который запускается после 300мс зажатия.
+     */
+    private fun MaterialButton.applyButtonPressAnimation() {
+        var holdAnimator: AnimatorSet? = null
+        val holdDelayMs = 300L
+
+        val holdRunnable = Runnable {
+            holdAnimator?.cancel()
+            holdAnimator = AnimatorSet().apply {
+                val scaleXPulse = ObjectAnimator.ofFloat(this@applyButtonPressAnimation, "scaleX", 0.93f, 0.88f, 0.93f)
+                val scaleYPulse = ObjectAnimator.ofFloat(this@applyButtonPressAnimation, "scaleY", 0.93f, 0.88f, 0.93f)
+                scaleXPulse.repeatCount = ObjectAnimator.INFINITE
+                scaleYPulse.repeatCount = ObjectAnimator.INFINITE
+                scaleXPulse.duration = 400
+                scaleYPulse.duration = 400
+                playTogether(scaleXPulse, scaleYPulse)
+                start()
+            }
+        }
+
+        setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    holdAnimator?.cancel()
+                    // Анимация нажатия — уменьшение
+                    AnimatorSet().apply {
+                        val sx = ObjectAnimator.ofFloat(v, "scaleX", 1f, 0.93f)
+                        val sy = ObjectAnimator.ofFloat(v, "scaleY", 1f, 0.93f)
+                        duration = 100
+                        playTogether(sx, sy)
+                        start()
+                    }
+                    // Запускаем pulse если удерживают
+                    v.postDelayed(holdRunnable, holdDelayMs)
+                    false
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    v.removeCallbacks(holdRunnable)
+                    holdAnimator?.cancel()
+                    holdAnimator = null
+                    // Анимация отпускания — возврат к исходному размеру
+                    AnimatorSet().apply {
+                        val sx = ObjectAnimator.ofFloat(v, "scaleX", v.scaleX, 1f)
+                        val sy = ObjectAnimator.ofFloat(v, "scaleY", v.scaleY, 1f)
+                        duration = 150
+                        playTogether(sx, sy)
+                        start()
+                    }
+                    false
+                }
+                else -> false
+            }
         }
     }
+
+    /**
+     * Ищет кнопку сервера в layoutServerButtons по тегу (configId или "auto")
+     * и обновляет её визуальное состояние.
+     *
+     * @param buttonTag  Long (configId) или String "auto"
+     * @param state      ServerButtonState — определяет цвет фона и обводки
+     */
+    fun updateServerButtonState(buttonTag: Any, state: ServerButtonState) {
+        val button = findServerButton(buttonTag) ?: return
+        button.applyServerButtonState(state)
+    }
+
+    /**
+     * Сбрасывает визуальное состояние всех кнопок серверов в DEFAULT.
+     * Вызывается перед тем, как выделить новую активную кнопку.
+     */
+    private fun updateAllServerButtonsToDefault() {
+        val container = binding.layoutServerButtons
+        for (i in 0 until container.childCount) {
+            val row = container.getChildAt(i)
+            if (row is ViewGroup) {
+                for (j in 0 until row.childCount) {
+                    val child = row.getChildAt(j)
+                    if (child is MaterialButton) child.applyServerButtonState(ServerButtonState.DEFAULT)
+                }
+            }
+        }
+    }
+
+    /**
+     * Рекурсивно ищет MaterialButton по тегу внутри layoutServerButtons.
+     */
+    private fun findServerButton(buttonTag: Any): MaterialButton? {
+        val container = binding.layoutServerButtons
+        for (i in 0 until container.childCount) {
+            val row = container.getChildAt(i)
+            if (row is ViewGroup) {
+                for (j in 0 until row.childCount) {
+                    val child = row.getChildAt(j)
+                    if (child is MaterialButton && child.tag == buttonTag) return child
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Применяет визуальное состояние к кнопке сервера.
+     */
+    private fun MaterialButton.applyServerButtonState(state: ServerButtonState) {
+        when (state) {
+            ServerButtonState.DEFAULT -> {
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    android.graphics.Color.TRANSPARENT
+                )
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                strokeWidth = (1 * resources.displayMetrics.density).toInt()
+                strokeColor = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.disconnected)
+                )
+                alpha = 1f
+            }
+            ServerButtonState.ACTIVE -> {
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.server_button_selected)
+                )
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                strokeWidth = (2 * resources.displayMetrics.density).toInt()
+                strokeColor = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.primary)
+                )
+                alpha = 1f
+            }
+            ServerButtonState.CONNECTING -> {
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.connecting)
+                )
+                setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.white))
+                strokeWidth = (2 * resources.displayMetrics.density).toInt()
+                strokeColor = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.connecting)
+                )
+                alpha = 1f
+            }
+            ServerButtonState.CONNECTED -> {
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.connecting)
+                )
+                setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.white))
+                strokeWidth = (2 * resources.displayMetrics.density).toInt()
+                strokeColor = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.connected)
+                )
+                alpha = 1f
+            }
+            ServerButtonState.ERROR -> {
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.error)
+                )
+                setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.white))
+                strokeWidth = (2 * resources.displayMetrics.density).toInt()
+                strokeColor = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.error)
+                )
+                alpha = 1f
+            }
+            ServerButtonState.DISABLED -> {
+                backgroundTintList = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.error)
+                )
+                setTextColor(ContextCompat.getColor(this@MainActivity, R.color.text_primary))
+                strokeWidth = (1 * resources.displayMetrics.density).toInt()
+                strokeColor = android.content.res.ColorStateList.valueOf(
+                    ContextCompat.getColor(this@MainActivity, R.color.disconnected)
+                )
+                alpha = 0.4f
+            }
+        }
+    }
+
     private fun showErrorDialog(message: String) {
         if (isFinishing || isDestroyed) {
             return
@@ -755,6 +932,25 @@ class MainActivity : AppCompatActivity() {
             .setMessage(message)
             .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
             .show()
+    }
+
+    /**
+     * Возможные визуальные состояния кнопки сервера.
+     * Используется в updateServerButtonState() для динамической смены фона.
+     */
+    enum class ServerButtonState {
+        /** Обычное состояние — прозрачный фон, серая обводка */
+        DEFAULT,
+        /** Выбранный сервер — акцентный фон, цветная обводка */
+        ACTIVE,
+        /** Идёт подключение к этому серверу */
+        CONNECTING,
+        /** Подключено через этот сервер */
+        CONNECTED,
+        /** Ошибка подключения к этому серверу */
+        ERROR,
+        /** Недоступна (нет подписки и т.п.) */
+        DISABLED
     }
 
     private fun navigateToLogin() {
