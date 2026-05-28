@@ -8,14 +8,12 @@ import android.text.format.Formatter
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import android.widget.LinearLayout
 import android.widget.Toast
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.remote.creation.first
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.button.MaterialButton
@@ -32,12 +30,14 @@ import ru.acestar.vpn.data.dao.VpnServerConfigDao
 import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.data.repository.UserRepository
 import ru.acestar.vpn.databinding.ActivityMainBinding
+import ru.acestar.vpn.ui.ActiveVpnProtocol
+import ru.acestar.vpn.vpn.WireGuardManager
 import ru.acestar.vpn.vpn.OpenVpnManager
 import ru.acestar.vpn.vpn.VpnConnectionState
 import java.io.ByteArrayInputStream
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
+
 
 class MainActivity : AppCompatActivity() {
 
@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity() {
     private var protocolReconnectPending = false
     private var selectedConfigName: String = "VPN Server"
     private var selectedConfigId: Long? = null
+    private var selectedConfigType: String? = null
 
     private var emailReminderDialog: AlertDialog? = null
     private var subscriptionReminderDialog: AlertDialog? = null
@@ -79,12 +80,14 @@ class MainActivity : AppCompatActivity() {
         if (configId > 0) {
             lifecycleScope.launch {
                 val config = viewModel.getConfigById(configId)
-                val shortHost = shortHostLabel(config?.serverHost ?: "")
                 if (config != null) {
-                    selectedConfigId = config.id
+                    selectedConfigId   = config.id
                     selectedConfigName = config.name
-                    isServerConfigs = false
-                    loadConfigFromContent(config.configContent, shortHost)
+                    selectedConfigType = config.type
+                    isServerConfigs    = false
+                    VpnSettingsPreferences.saveSelectedConfigId(this@MainActivity, config.id)
+                    // Загружаем конфиг, но НЕ подключаемся — пользователь жмёт "Подключиться"
+                    loadConfigUniversal(config.configContent, shortHostLabel(config.serverHost), config.type)
                 }
             }
         }
@@ -114,6 +117,10 @@ class MainActivity : AppCompatActivity() {
         vpnServerConfigDao = AppDatabase.getDatabase(applicationContext).vpnServerConfigDao()
         setupUI()
         observeViewModel()
+        isServerConfigs = VpnSettingsPreferences.getIsServerConfig(this)
+        // Восстанавливаем selectedConfigId после пересоздания Activity
+        val savedId = VpnSettingsPreferences.getSelectedConfigId(this)
+        if (savedId > 0L) selectedConfigId = savedId
 
         // ← Потом запускаем корутину с авторизацией
         lifecycleScope.launch {
@@ -127,6 +134,8 @@ class MainActivity : AppCompatActivity() {
                 navigateToLogin()
                 return@launch
             }
+
+
 
             if (intent.getBooleanExtra(EXTRA_GETTING_USER_DATA, false)) {
                 val result = authApiService.getUserData(
@@ -146,18 +155,33 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        isServerConfigs = VpnSettingsPreferences.getIsServerConfig(this)
         emailReminderDismissedForSession = false
         subscriptionReminderDismissedForSession = false
         viewModel.refreshUser()
-        viewModel.vpnManager.bindService(this)
-        viewModel.vpnManager.ensureLoadedStateOnResume()
+
+        if (viewModel.activeProtocol.value == ActiveVpnProtocol.OPENVPN) {
+            viewModel.vpnManager.bindService(this)
+            viewModel.vpnManager.ensureLoadedStateOnResume()
+        }
+        if (viewModel.activeProtocol.value == ActiveVpnProtocol.WIREGUARD) {
+            viewModel.wireGuardManager.ensureLoadedStateOnResume()
+        }
+        // Если VPN подключён — убеждаемся что кнопка "Подключиться" активна
+        viewModel.restoreConfigLoadedIfConnected()
+
         if (viewModel.connectionState.value == VpnConnectionState.CONNECTED && !isManualTrafficSession) {
             isManualTrafficSession = true
         }
+
+        // Восстанавливаем визуальное состояние кнопок после возврата в активити
+        syncButtonStates()
     }
 
     override fun onPause() {
-        viewModel.vpnManager.unbindService(this)
+        if (viewModel.activeProtocol.value == ActiveVpnProtocol.OPENVPN) {
+            viewModel.vpnManager.unbindService(this)
+        }
         super.onPause()
     }
 
@@ -185,7 +209,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.btnPause.setOnClickListener {
-            viewModel.vpnManager.togglePause()
+            if(selectedConfigType == "OpenVPN") {
+                viewModel.vpnManager.togglePause()
+            }
         }
 
         binding.btnSettings.setOnClickListener {
@@ -253,7 +279,7 @@ class MainActivity : AppCompatActivity() {
             VpnConnectionState.CONNECTED,
             VpnConnectionState.CONNECTING -> {
                 clearGraphOnDisconnect = true
-                viewModel.vpnManager.disconnect()
+                viewModel.disconnectActive()
             }
 
             VpnConnectionState.DISCONNECTED,
@@ -267,18 +293,24 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
                 startTrafficSession()
-                viewModel.vpnManager.connect(this)
+                viewModel.connectActive(this)
+                VpnSettingsPreferences.saveIsServerConfig(this, isServerConfigs)
             }
 
-            VpnConnectionState.DISCONNECTING -> {}
+            VpnConnectionState.DISCONNECTING -> { /* ждём */ }
         }
     }
 
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == OpenVpnManager.VPN_PERMISSION_REQUEST_CODE && resultCode == RESULT_OK) {
-            viewModel.vpnManager.startVpn(this)
+        when (requestCode) {
+            OpenVpnManager.VPN_PERMISSION_REQUEST_CODE -> {         // 1001
+                if (resultCode == RESULT_OK) viewModel.vpnManager.startVpn(this)
+            }
+            WireGuardManager.VPN_PERMISSION_REQUEST_CODE -> {       // 1002 — ранее терялся
+                if (resultCode == RESULT_OK) viewModel.wireGuardManager.startTunnel()
+            }
         }
     }
 
@@ -294,9 +326,14 @@ class MainActivity : AppCompatActivity() {
                     protocolReconnectPending = false
                     reconnectVpnIfPossible()
                 }
+                // При восстановлении подключения после resume — помечаем конфиг загруженным
+                if (state == VpnConnectionState.CONNECTED) {
+                    viewModel.restoreConfigLoadedIfConnected()
+                }
                 updateConnectionUI(state)
                 if (state == VpnConnectionState.DISCONNECTED || state == VpnConnectionState.CONNECTED) {
                     updateServerInfoText()
+                    syncButtonStates()
                 }
             }
         }
@@ -341,6 +378,48 @@ class MainActivity : AppCompatActivity() {
                 updateMainBanners(user)
             }
         }
+        lifecycleScope.launch {
+            viewModel.autoModeState.collectLatest { state ->
+                when (state) {
+                    is MainViewModel.AutoModeState.Trying -> {
+                        selectedConfigType = state.type
+                        // Имя конфига не показываем — только счётчик и буква протокола
+                        val protoLetter = when (state.type.lowercase()) {
+                            "wireguard", "amneziawg" -> "W"
+                            else -> "O"
+                        }
+                        updateServerButtonState("auto", ServerButtonState.CONNECTING)
+                        binding.tvServerInfo.visibility = View.VISIBLE
+                        binding.tvServerInfo.text = getString(
+                            R.string.auto_trying,
+                            state.index,
+                            state.total,
+                            protoLetter
+                        )
+                    }
+                    is MainViewModel.AutoModeState.Connected -> {
+                        selectedConfigType = state.config.type
+                        selectedConfigName = state.config.name
+                        syncButtonStates()
+                        updateServerInfoText()
+                    }
+                    is MainViewModel.AutoModeState.AllFailed -> {
+                        updateServerButtonState("auto", ServerButtonState.ERROR)
+                        showToast(getString(R.string.auto_all_failed))
+                        lifecycleScope.launch {
+                            delay(3_000)
+                            // Сбрасываем только если авто-режим уже не запущен снова
+                            if (viewModel.autoModeState.value is MainViewModel.AutoModeState.AllFailed) {
+                                updateServerButtonState("auto", ServerButtonState.DEFAULT)
+                            }
+                        }
+                    }
+                    is MainViewModel.AutoModeState.Idle -> {
+                        updateServerButtonState("auto", ServerButtonState.DEFAULT)
+                    }
+                }
+            }
+        }
 
         lifecycleScope.launch {
             viewModel.configLoaded.collectLatest { loaded ->
@@ -363,13 +442,21 @@ class MainActivity : AppCompatActivity() {
                 if (selectedDeleted) {
                     selectedConfigId = null
                     selectedConfigName = "Server"
-                    viewModel.clearConfigLoaded()
+//                    if (selectedConfigType == "OpenVPN"){
+                        viewModel.clearConfigLoaded()
+//                    }else if (selectedConfigType == "WireGuard") {
+//
+//                    }
                     binding.tvServerInfo.visibility = View.GONE
                     if (currentConnectionState == VpnConnectionState.CONNECTED ||
                         currentConnectionState == VpnConnectionState.CONNECTING ||
                         currentConnectionState == VpnConnectionState.DISCONNECTING
                     ) {
-                        viewModel.vpnManager.disconnect()
+                        if(selectedConfigType == "OpenVPN"){
+                            viewModel.vpnManager.disconnect()
+                        }else if(selectedConfigType == "WireGuard"){
+                            viewModel.wireGuardManager.disconnect()
+                        }
                     }
                 }
             }
@@ -504,6 +591,23 @@ class MainActivity : AppCompatActivity() {
             trafficSamples.removeFirst()
         }
     }
+    private fun reconnectVpnForProtocol() {
+        if (selectedConfigType != "OpenVPN") return
+        if (!viewModel.vpnManager.hasConfig()) return
+
+        viewModel.vpnManager.reloadCurrentConfigWithProtocol(selectedConfigName)
+
+        when (currentConnectionState) {
+            VpnConnectionState.CONNECTED,
+            VpnConnectionState.CONNECTING,
+            VpnConnectionState.DISCONNECTING -> {
+                protocolReconnectPending = true
+                viewModel.vpnManager.disconnect()
+            }
+            VpnConnectionState.DISCONNECTED,
+            VpnConnectionState.ERROR -> reconnectVpnIfPossible()
+        }
+    }
 
     private fun refreshPauseButtonVisibility() {
         val showPauseButton = currentConnectionState == VpnConnectionState.CONNECTED || isPausedState
@@ -517,7 +621,12 @@ class MainActivity : AppCompatActivity() {
             serverName
         )
         if (success) {
-            viewModel.onConfigLoaded()
+            if (selectedConfigType == "OpenVPN"){
+                viewModel.onConfigLoaded()
+            }else if (selectedConfigType == "WireGuard"){
+
+            }
+
 //            showToast(R.string.config_loaded)
             updateServerInfoText()
             showToast(getString(R.string.config_loaded))
@@ -525,33 +634,46 @@ class MainActivity : AppCompatActivity() {
             showToast("Ошибка загрузки конфигурации")
         }
     }
-    private fun waitLoadServerConfigs(){
-        lifecycleScope.launch {
-            val result = viewModel.loadServerConfigsAndWait(1)
+    private fun loadConfigUniversal(content: String, name: String, type: String) {
+        selectedConfigName = name
+        selectedConfigType = type
 
-            if (result) {
-                // Конфиги загружены, подключаемся
-                updateServerInfoText()
-                viewModel.onConfigLoaded()
-
-                when (currentConnectionState) {
-                    VpnConnectionState.CONNECTED,
-                    VpnConnectionState.CONNECTING,
-                    VpnConnectionState.DISCONNECTING -> {
-                        protocolReconnectPending = true
-                        viewModel.vpnManager.disconnect()
-                    }
-                    VpnConnectionState.DISCONNECTED,
-                    VpnConnectionState.ERROR -> {
-                        reconnectVpnIfPossible()
-                    }
-                }
-            } else {
-                delay(500)
-                waitLoadServerConfigs()
-            }
+        val success = viewModel.loadUserConfig(content, name, type)
+        if (success) {
+            viewModel.onConfigLoaded()
+            updateServerInfoText()
+            showToast(getString(R.string.config_loaded))
+        } else {
+            showToast("Ошибка загрузки конфигурации")
         }
     }
+//    private fun waitLoadServerConfigs(){
+//        lifecycleScope.launch {
+//            val result = viewModel.loadServerConfigsAndWait(1)
+//
+//            if (result) {
+//                // Конфиги загружены, подключаемся
+//                updateServerInfoText()
+//                viewModel.onConfigLoaded()
+//
+//                when (currentConnectionState) {
+//                    VpnConnectionState.CONNECTED,
+//                    VpnConnectionState.CONNECTING,
+//                    VpnConnectionState.DISCONNECTING -> {
+//                        protocolReconnectPending = true
+//                        viewModel.vpnManager.disconnect()
+//                    }
+//                    VpnConnectionState.DISCONNECTED,
+//                    VpnConnectionState.ERROR -> {
+//                        reconnectVpnIfPossible()
+//                    }
+//                }
+//            } else {
+//                delay(500)
+//                waitLoadServerConfigs()
+//            }
+//        }
+//    }
 
     private fun updateServerButtons(configs: List<VpnConfigEntity>) {
         binding.layoutServerButtons.removeAllViews()
@@ -561,15 +683,34 @@ class MainActivity : AppCompatActivity() {
 
 
         buttons += createServerButton().apply {
-            tag = "auto"
+            tag  = "auto"
             text = "Авто"
             setOnClickListener {
                 updateAllServerButtonsToDefault()
                 updateServerButtonState("auto", ServerButtonState.ACTIVE)
-                isServerConfigs = true
-                if(viewModel.hasActiveSubscription()){
-                    waitLoadServerConfigs()
-                }else{
+                VpnSettingsPreferences.saveIsServerConfig(this@MainActivity, true)
+                isServerConfigs    = true
+                selectedConfigType = null // авто-режим, тип неизвестен заранее
+                selectedConfigId   = null
+                VpnSettingsPreferences.saveSelectedConfigId(this@MainActivity, -1L)
+
+                if (viewModel.hasActiveSubscription()) {
+                    // Отключаем текущее если было, потом запускаем авто-перебор
+                    if (currentConnectionState == VpnConnectionState.CONNECTED ||
+                        currentConnectionState == VpnConnectionState.CONNECTING
+                    ) {
+                        viewModel.disconnectActive()
+                        // Небольшая задержка, потом запускаем авто
+                        lifecycleScope.launch {
+                            delay(800)
+                            startTrafficSession()
+                            viewModel.startAutoMode(this@MainActivity)
+                        }
+                    } else {
+                        startTrafficSession()
+                        viewModel.startAutoMode(this@MainActivity)
+                    }
+                } else {
                     showErrorDialog("Срок действия подписки истек")
                 }
             }
@@ -594,25 +735,31 @@ class MainActivity : AppCompatActivity() {
                 text = "$shortHost $protocol"
 
 
-                var isActive: Boolean;
+//                var isActive: Boolean;
 
-                if (favorite.id == selectedConfigId) isActive = true
-                else isActive = false
+//                if (favorite.id == selectedConfigId) isActive = true
+//                else isActive = false
 
 
                 setOnClickListener {
-                    // Сбрасываем все кнопки в DEFAULT, выделяем нажатую
                     updateAllServerButtonsToDefault()
                     updateServerButtonState(favorite.id, ServerButtonState.ACTIVE)
-                    selectedConfigId = favorite.id
-                    isServerConfigs = false
-                    loadConfigFromContent(favorite.configContent, shortHost)
+                    VpnSettingsPreferences.saveIsServerConfig(this@MainActivity, false)
+                    isServerConfigs    = false
+                    selectedConfigId   = favorite.id
+                    selectedConfigType = favorite.type
+                    VpnSettingsPreferences.saveSelectedConfigId(this@MainActivity, favorite.id)
+
+                    // БЫЛО: if (favorite.type == "WireGuard") { loadConfig... } else { loadConfigFromContent... }
+                    // СТАЛО: единый метод
+                    loadConfigUniversal(favorite.configContent, shortHostLabel(favorite.serverHost), favorite.type)
+
                     when (currentConnectionState) {
                         VpnConnectionState.CONNECTED,
                         VpnConnectionState.CONNECTING,
                         VpnConnectionState.DISCONNECTING -> {
                             protocolReconnectPending = true
-                            viewModel.vpnManager.disconnect()
+                            viewModel.disconnectActive()
                         }
                         VpnConnectionState.DISCONNECTED,
                         VpnConnectionState.ERROR -> reconnectVpnIfPossible()
@@ -643,22 +790,51 @@ class MainActivity : AppCompatActivity() {
             }
             binding.layoutServerButtons.addView(row)
         }
+
+        // Кнопки пересозданы — восстанавливаем актуальное визуальное состояние
+        syncButtonStates()
     }
 
-    private fun reconnectVpnForProtocol() {
-        if (!viewModel.vpnManager.hasConfig()) return
-        viewModel.vpnManager.reloadCurrentConfigWithProtocol(selectedConfigName)
-        when (currentConnectionState) {
-            VpnConnectionState.CONNECTED,
-            VpnConnectionState.CONNECTING,
-            VpnConnectionState.DISCONNECTING -> {
-                protocolReconnectPending = true
-                viewModel.vpnManager.disconnect()
+    /**
+     * Синхронизирует визуальное состояние кнопок серверов с текущим состоянием подключения.
+     * Вызывается при: смене connectionState, onResume, пересоздании кнопок (updateServerButtons).
+     *
+     * Логика:
+     * - Если авто-режим активен и идёт перебор → кнопка "Авто" уже управляется из autoModeState observer
+     * - Если подключено через авто → кнопка "Авто" = CONNECTED, остальные DEFAULT
+     * - Если подключено через избранное → нужная кнопка = CONNECTED, остальные DEFAULT
+     * - Если отключено → все DEFAULT (кроме случая когда авто-режим в состоянии Trying/AllFailed)
+     */
+    private fun syncButtonStates() {
+        val connState = viewModel.connectionState.value
+        val autoState = viewModel.autoModeState.value
+
+        // Если авто-режим в процессе перебора — не трогаем, им управляет autoModeState observer
+        if (autoState is MainViewModel.AutoModeState.Trying) return
+
+        updateAllServerButtonsToDefault()
+
+        when {
+            // Авто-режим подключён
+            autoState is MainViewModel.AutoModeState.Connected &&
+            (connState == VpnConnectionState.CONNECTED || connState == VpnConnectionState.CONNECTING) -> {
+                updateServerButtonState("auto", ServerButtonState.CONNECTED)
             }
-            VpnConnectionState.DISCONNECTED,
-            VpnConnectionState.ERROR -> {
-                reconnectVpnIfPossible()
+
+            // Авто-режим был активен (isServerConfigs) и мы подключены
+            isServerConfigs &&
+            (connState == VpnConnectionState.CONNECTED || connState == VpnConnectionState.CONNECTING) -> {
+                updateServerButtonState("auto", ServerButtonState.CONNECTED)
             }
+
+            // Подключено через избранное
+            !isServerConfigs &&
+            selectedConfigId != null &&
+            (connState == VpnConnectionState.CONNECTED || connState == VpnConnectionState.CONNECTING) -> {
+                updateServerButtonState(selectedConfigId!!, ServerButtonState.CONNECTED)
+            }
+
+            // Всё остальное — DEFAULT (уже сброшено выше)
         }
     }
 
@@ -666,23 +842,39 @@ class MainActivity : AppCompatActivity() {
         if (!viewModel.hasActiveSubscription()) return
         if (!viewModel.configLoaded.value) return
         if (!isManualTrafficSession) startTrafficSession()
-        viewModel.vpnManager.connect(this)
+        viewModel.connectActive(this)
     }
 
+
+
     private fun updateServerInfoText() {
-        val serverInfo = viewModel.vpnManager.getServerInfo() ?: return
-        val protocol = viewModel.vpnManager.getCurrentProtocolLabel()
-        binding.tvServerInfo.visibility = View.VISIBLE
-        if(isServerConfigs){
-            binding.tvServerInfo.text = getString(R.string.server_info_auto)
-        }
-        else{
-            binding.tvServerInfo.text = getString(
-                R.string.server_info_with_protocol,
-                serverInfo.first,
-                serverInfo.second,
-                protocol
-            )
+        isServerConfigs = VpnSettingsPreferences.getIsServerConfig(this)
+        when {
+            isServerConfigs -> {
+                binding.tvServerInfo.visibility = View.VISIBLE
+                binding.tvServerInfo.text = getString(R.string.server_info_auto)
+            }
+            selectedConfigType == "WireGuard" -> {
+                binding.tvServerInfo.visibility = View.VISIBLE
+                // У WireGuard нет host/port в конфиге в том же формате
+                binding.tvServerInfo.text = getString(
+                    R.string.server_info_with_protocol,
+                    selectedConfigName, "", "WireGuard"
+                )
+            }
+            selectedConfigType == "OpenVPN" -> {
+                val serverInfo = viewModel.vpnManager.getServerInfo() ?: run {
+                    binding.tvServerInfo.visibility = View.GONE
+                    return
+                }
+                val protocol = viewModel.vpnManager.getCurrentProtocolLabel()
+                binding.tvServerInfo.visibility = View.VISIBLE
+                binding.tvServerInfo.text = getString(
+                    R.string.server_info_with_protocol,
+                    serverInfo.first, serverInfo.second, protocol
+                )
+            }
+            else -> binding.tvServerInfo.visibility = View.GONE
         }
     }
 
@@ -882,12 +1074,12 @@ class MainActivity : AppCompatActivity() {
             }
             ServerButtonState.CONNECTED -> {
                 backgroundTintList = android.content.res.ColorStateList.valueOf(
-                    ContextCompat.getColor(this@MainActivity, R.color.connecting)
+                    ContextCompat.getColor(this@MainActivity, R.color.primary)
                 )
                 setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.white))
                 strokeWidth = (2 * resources.displayMetrics.density).toInt()
                 strokeColor = android.content.res.ColorStateList.valueOf(
-                    ContextCompat.getColor(this@MainActivity, R.color.connected)
+                    ContextCompat.getColor(this@MainActivity, R.color.primary_dark)
                 )
                 alpha = 1f
             }

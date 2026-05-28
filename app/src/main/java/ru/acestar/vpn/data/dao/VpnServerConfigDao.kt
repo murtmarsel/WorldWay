@@ -49,6 +49,27 @@ interface VpnServerConfigDao {
             "   END;")
     fun observeAllByOrder(userId: Long): Flow<List<VpnServerConfigEntity>>
 
+
+    @Query("SELECT * FROM vpn_server_configs " +
+            "WHERE userId = :userId " +
+            "ORDER BY " +
+            "   CASE type" +
+            "       WHEN 'openvpn' THEN 1" +
+            "       WHEN 'wireguard' THEN 2" +
+            "       WHEN 'amneziawg' THEN 3" +
+            "       ELSE 4" +
+            "   END," +
+            "   CASE category" +
+            "       WHEN 'antizapret' THEN 1" +
+            "       WHEN 'antizapret-tcp' THEN 2" +
+            "       WHEN 'antizapret-udp' THEN 3" +
+            "       WHEN 'vpn' THEN 4" +
+            "       WHEN 'vpn-tcp' THEN 5" +
+            "       WHEN 'vpn-udp' THEN 6" +
+            "       ELSE 7" +
+            "   END;")
+    suspend fun getAllByOrder(userId: Long): List<VpnServerConfigEntity>
+
 //    @Query("SELECT COUNT(*) FROM vpn_server_configs WHERE userId = :userId AND source = :source")
 //    suspend fun countBySource(userId: Long, source: String): Int
 

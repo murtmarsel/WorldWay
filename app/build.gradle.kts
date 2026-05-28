@@ -30,11 +30,14 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
+
     }
 
     kotlinOptions {
@@ -88,6 +91,12 @@ dependencies {
     
     // OpenVPN (maintained upstream)
     implementation("com.github.appstacks0:openvpn:1.0.9")
+//    implementation("com.github.murtmarsel:openvpn:b1f5b0a")
+
+    // WireGuard
+    implementation("com.wireguard.android:tunnel:1.0.20260102")
+    // Для поддержки Java 8+ (требуется библиотекой)
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     // Required by OpenVPN service internals for state broadcasting
     implementation("org.greenrobot:eventbus:3.3.1")
     

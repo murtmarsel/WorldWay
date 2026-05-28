@@ -11,6 +11,7 @@ data class VpnConfigEntity(
     val name: String,
     val serverHost: String,
     val configContent: String,
+    val type: String,
     val source: String,
     val isFavorite: Boolean = false,
     val createdAt: Long = System.currentTimeMillis()

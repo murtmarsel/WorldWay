@@ -15,85 +15,77 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
 import ru.acestar.vpn.VpnApplication
-import ru.acestar.vpn.data.model.User
-import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.data.model.VpnConfigEntity
+import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.databinding.ActivityConfigSelectionBinding
 
 class ConfigSelectionActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_SELECTED_CONFIG_ID = "selected_config_id"
-        const val EXTRA_ACTIVE_CONFIG_ID = "active_config_id"
-        const val EXTRA_OPEN_ADD = "open_add"
+        const val EXTRA_ACTIVE_CONFIG_ID   = "active_config_id"
+        const val EXTRA_OPEN_ADD           = "open_add"
     }
 
+    // ─── Тип конфига ─────────────────────────────────────────────────────────
+    enum class VpnConfigType { OPENVPN, WIREGUARD, UNKNOWN }
+
+    // ─── Поля ─────────────────────────────────────────────────────────────────
     private lateinit var binding: ActivityConfigSelectionBinding
-    private val configDao by lazy { (application as VpnApplication).database.vpnConfigDao() }
+
+    private val configDao      by lazy { (application as VpnApplication).database.vpnConfigDao() }
     private val sessionManager by lazy { SessionManager.getInstance(this) }
-    private val currentUserId = MutableStateFlow(-1L)
+
+    private var currentUserId = -1L
     private var configs: List<VpnConfigEntity> = emptyList()
     private var activeConfigId: Long = -1L
 
     private val configFilePicker = registerForActivityResult(
         ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { saveConfigFromUri(it) }
-    }
+    ) { uri: Uri? -> uri?.let { saveConfigFromUri(it) } }
+
+    // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
-
         ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
 
+        // FIX: binding инициализируем сразу, до корутин
+        binding = ActivityConfigSelectionBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        activeConfigId = intent.getLongExtra(EXTRA_ACTIVE_CONFIG_ID, -1L)
+        setupUi()
 
         lifecycleScope.launch {
-            currentUserId.collect { userId ->
-                if (userId != -1L) {
-                    binding = ActivityConfigSelectionBinding.inflate(layoutInflater)
+            currentUserId = sessionManager.getUserId()
+            if (currentUserId == -1L) {
+                finish()
+                return@launch
+            }
+            observeConfigs()
 
-                    setContentView(binding.root)
-                    activeConfigId = intent.getLongExtra(EXTRA_ACTIVE_CONFIG_ID, -1L)
-                    setupUi()
-                    observeConfigs()
-
-                    if (intent.getBooleanExtra(EXTRA_OPEN_ADD, false)) {
-                        binding.root.post { configFilePicker.launch("*/*") }
-                    }
-
-                }
+            if (intent.getBooleanExtra(EXTRA_OPEN_ADD, false)) {
+                binding.root.post { configFilePicker.launch("*/*") }
             }
         }
-
-        lifecycleScope.launch {
-            currentUserId.value = sessionManager.getUserId()
-
-        }
-
-//        if (currentUserId.value == -1L) {
-//            finish()
-//            return
-//        }
-
-
     }
 
-    private fun setupUi() {
+    // ─── UI ───────────────────────────────────────────────────────────────────
 
+    private fun setupUi() {
         binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.btnAddConfig.setOnClickListener { configFilePicker.launch("*/*") }
     }
 
     private fun observeConfigs() {
-        if (currentUserId.value == -1L) return
         lifecycleScope.launch {
-            configDao.observeAllByUser(currentUserId.value).collectLatest { list ->
+            configDao.observeAllByUser(currentUserId).collectLatest { list ->
                 configs = list.filter { it.configContent.isNotBlank() }
                 renderList()
             }
@@ -109,38 +101,59 @@ class ConfigSelectionActivity : AppCompatActivity() {
         binding.lvConfigs.adapter = ConfigListAdapter()
         binding.lvConfigs.setOnItemClickListener { _, _, position, _ ->
             val selected = configs[position]
-
             setResult(
                 Activity.RESULT_OK,
                 Intent().putExtra(EXTRA_SELECTED_CONFIG_ID, selected.id)
             )
-            println(selected.id)
             finish()
         }
     }
-    private fun shortHostLabel(host: String): String {
-        val parts = host.split(".")
-        if (parts.size >= 2) return "${parts[0]}.${parts[1]}"
-        return host.take(10)
-    }
+
+    // ─── СОХРАНЕНИЕ КОНФИГА ───────────────────────────────────────────────────
+
     private fun saveConfigFromUri(uri: Uri) {
         try {
             contentResolver.openInputStream(uri)?.use { inputStream ->
                 val configText = inputStream.bufferedReader().use { it.readText() }
-                val host = extractServerHost(configText).ifBlank { "-" }
+
+                // Определяем тип по содержимому + расширению
+                val detectedType = detectVpnConfigType(uri, configText)
+                if (detectedType == VpnConfigType.UNKNOWN) {
+                    showToast("Неизвестный формат конфига")
+                    return
+                }
+
+                val typeString = when (detectedType) {
+                    VpnConfigType.OPENVPN   -> "OpenVPN"
+                    VpnConfigType.WIREGUARD -> "WireGuard"
+                    else                    -> "Unknown"
+                }
+
+                val host      = when (detectedType) {
+                    VpnConfigType.OPENVPN   -> extractOpenVpnServerHost(configText)
+                    VpnConfigType.WIREGUARD -> extractWireGuardEndpoint(configText)
+                    else                    -> ""
+                }.ifBlank { "-" }
+
                 val fileName = resolveFileName(uri)
-                val shortHost = shortHostLabel(host)
-                val name = extractFriendlyName(configText)
-                    .ifBlank { fileName.substringBeforeLast(".") }
-                    .ifBlank { host }
+                val name = when (detectedType) {
+                    VpnConfigType.OPENVPN -> extractFriendlyName(configText)
+                        .ifBlank { fileName.substringBeforeLast(".") }
+                        .ifBlank { host }
+                    VpnConfigType.WIREGUARD -> fileName.substringBeforeLast(".")
+                        .ifBlank { host }
+                    else -> fileName
+                }
+
                 lifecycleScope.launch {
                     configDao.insert(
                         VpnConfigEntity(
-                            userId = currentUserId.value,
-                            name = name,
-                            serverHost = host,
+                            userId        = currentUserId,
+                            name          = name,
+                            serverHost    = host,
                             configContent = configText,
-                            source = "manual"
+                            source        = "manual",
+                            type          = typeString,
                         )
                     )
                     showToast(R.string.config_saved)
@@ -151,29 +164,126 @@ class ConfigSelectionActivity : AppCompatActivity() {
         }
     }
 
-    private fun resolveFileName(uri: Uri): String {
-        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (index >= 0 && cursor.moveToFirst()) {
-                return cursor.getString(index) ?: "config"
+    // ─── ОПРЕДЕЛЕНИЕ ТИПА КОНФИГА ─────────────────────────────────────────────
+
+    /**
+     * Определяет тип конфига: сначала по содержимому (надёжно),
+     * затем по расширению как fallback.
+     */
+    private fun detectVpnConfigType(uri: Uri, content: String): VpnConfigType {
+        // 1. Анализ содержимого — самый надёжный способ
+        val lines = content.lines()
+            .map { it.trim().lowercase() }
+            .filter { it.isNotBlank() && !it.startsWith("#") && !it.startsWith(";") }
+            .take(60)
+
+        // Признаки WireGuard
+        val wgIndicators = listOf(
+            "[interface]", "[peer]",
+            "privatekey =", "publickey =",
+            "allowedips =", "endpoint =",
+            "listenport =", "dns =",
+            "presharedkey ="
+        )
+        // Признаки OpenVPN
+        val ovpnIndicators = listOf(
+            "client", "dev tun", "dev tap",
+            "proto udp", "proto tcp",
+            "remote ", "ca ", "<ca>",
+            "cert ", "key ", "<cert>", "<key>",
+            "pkcs12", "tls-auth", "tls-crypt",
+            "auth-user-pass", "cipher "
+        )
+
+        var wgScore   = 0
+        var ovpnScore = 0
+
+        for (line in lines) {
+            when {
+                wgIndicators.any   { line.startsWith(it) || line == it } -> wgScore++
+                ovpnIndicators.any { line.startsWith(it) || line == it } -> ovpnScore++
             }
         }
-        return "config"
+
+        if (wgScore >= 2)   return VpnConfigType.WIREGUARD
+        if (ovpnScore >= 2) return VpnConfigType.OPENVPN
+
+        // 2. Fallback по расширению
+        val fileName = resolveFileName(uri)
+        return when {
+            fileName.endsWith(".ovpn", ignoreCase = true) -> VpnConfigType.OPENVPN
+            fileName.endsWith(".conf", ignoreCase = true) -> {
+                // .conf может быть обоим — пробуем ещё раз с меньшим порогом
+                when {
+                    wgScore > 0   -> VpnConfigType.WIREGUARD
+                    ovpnScore > 0 -> VpnConfigType.OPENVPN
+                    else          -> VpnConfigType.UNKNOWN
+                }
+            }
+            else -> VpnConfigType.UNKNOWN
+        }
     }
 
-    private fun extractFriendlyName(configContent: String): String {
-        configContent.lines().forEach { line ->
+    // ─── ПАРСИНГ КОНФИГОВ ────────────────────────────────────────────────────
+
+    /** Извлекает хост из OpenVPN конфига (строка `remote HOST PORT`). */
+    private fun extractOpenVpnServerHost(content: String): String {
+        for (line in content.lines()) {
             val trimmed = line.trim()
-            if (trimmed.startsWith("setenv FRIENDLY_NAME")) {
-                val value = trimmed.removePrefix("setenv FRIENDLY_NAME").trim()
-                return value.trim('"').trim()
+            if (trimmed.startsWith("remote ", ignoreCase = true)) {
+                val parts = trimmed.split("\\s+".toRegex())
+                if (parts.size >= 2) return parts[1]
             }
         }
         return ""
     }
 
-    private fun extractProtocolLabel(configContent: String): String {
-        configContent.lines().forEach { line ->
+    /**
+     * Извлекает хост из WireGuard конфига (строка `Endpoint = HOST:PORT`).
+     * Убирает порт, возвращает только хост.
+     */
+    private fun extractWireGuardEndpoint(content: String): String {
+        for (line in content.lines()) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("Endpoint", ignoreCase = true) && trimmed.contains("=")) {
+                val value = trimmed.substringAfter("=").trim()
+                // IPv6 формат [::1]:port — убираем порт
+                return if (value.startsWith("[")) {
+                    value.substringBefore("]").removePrefix("[")
+                } else {
+                    value.substringBeforeLast(":")
+                }
+            }
+        }
+        return ""
+    }
+
+    /** Читает FRIENDLY_NAME из OpenVPN конфига. */
+    private fun extractFriendlyName(content: String): String {
+        for (line in content.lines()) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("setenv FRIENDLY_NAME", ignoreCase = true)) {
+                return trimmed.removePrefix("setenv FRIENDLY_NAME")
+                    .trim().trim('"')
+            }
+        }
+        return ""
+    }
+
+    /**
+     * Возвращает метку протокола для отображения в списке.
+     * FIX: WireGuard конфиги не имеют строки `proto` — возвращаем "WireGuard".
+     */
+    private fun getProtocolLabel(item: VpnConfigEntity): String {
+        return when (item.type) {
+            "WireGuard" -> "WireGuard"
+            "OpenVPN"   -> extractOpenVpnProtocol(item.configContent)
+            else        -> "?"
+        }
+    }
+
+    private fun extractOpenVpnProtocol(content: String): String {
+        for (line in content.lines()) {
             val trimmed = line.trim().lowercase()
             if (trimmed.startsWith("proto ")) {
                 return when {
@@ -186,15 +296,32 @@ class ConfigSelectionActivity : AppCompatActivity() {
         return "AUTO"
     }
 
-    private fun extractServerHost(configContent: String): String {
-        configContent.lines().forEach { line ->
-            val trimmed = line.trim()
-            if (trimmed.startsWith("remote ")) {
-                val parts = trimmed.split("\\s+".toRegex())
-                if (parts.size >= 2) return parts[1]
+    // ─── УТИЛИТЫ ─────────────────────────────────────────────────────────────
+
+    private fun resolveFileName(uri: Uri): String {
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) {
+                return cursor.getString(idx) ?: "config"
             }
         }
-        return ""
+        return "config"
+    }
+
+    /**
+     * Короткая метка хоста для отображения.
+     * FIX: IP-адрес (напр. 1.2.3.4) возвращается целиком,
+     * домен сокращается до первых двух сегментов.
+     */
+    private fun shortHostLabel(host: String): String {
+        if (host.isBlank() || host == "-") return host
+        // IP-адрес — оставляем целиком
+        if (host.matches(Regex("""^\d{1,3}(\.\d{1,3}){3}$"""))) return host
+        // IPv6 — оставляем как есть
+        if (host.contains(":")) return host
+        // Домен — первые два сегмента
+        val parts = host.split(".")
+        return if (parts.size >= 2) "${parts[0]}.${parts[1]}" else host.take(16)
     }
 
     private fun showToast(messageRes: Int) {
@@ -207,57 +334,64 @@ class ConfigSelectionActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
+    // ─── АДАПТЕР ─────────────────────────────────────────────────────────────
+
     private inner class ConfigListAdapter : BaseAdapter() {
         private val inflater = LayoutInflater.from(this@ConfigSelectionActivity)
 
-        override fun getCount(): Int = configs.size
-        override fun getItem(position: Int): Any = configs[position]
-        override fun getItemId(position: Int): Long = configs[position].id
+        override fun getCount(): Int    = configs.size
+        override fun getItem(pos: Int): Any = configs[pos]
+        override fun getItemId(pos: Int): Long = configs[pos].id
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val view = convertView ?: inflater.inflate(R.layout.item_config, parent, false)
+            val view = convertView
+                ?: inflater.inflate(R.layout.item_config, parent, false)
             val item = configs[position]
 
-            val tvTitle = view.findViewById<TextView>(R.id.tvTitle)
+            val tvTitle    = view.findViewById<TextView>(R.id.tvTitle)
             val tvSubtitle = view.findViewById<TextView>(R.id.tvSubtitle)
-            val tvActive = view.findViewById<TextView>(R.id.tvActive)
+            val tvActive   = view.findViewById<TextView>(R.id.tvActive)
             val btnFavorite = view.findViewById<TextView>(R.id.btnFavorite)
-            val btnDelete = view.findViewById<TextView>(R.id.btnDelete)
+            val btnDelete  = view.findViewById<TextView>(R.id.btnDelete)
 
-            val protocol = extractProtocolLabel(item.configContent)
-            tvTitle.text = "${item.name} [$protocol]"
-            tvSubtitle.text = item.serverHost
+            // FIX: метка протокола корректна для обоих типов
+            val protocolLabel = getProtocolLabel(item)
+            tvTitle.text    = "${item.name} [$protocolLabel]"
+            tvSubtitle.text = shortHostLabel(item.serverHost)
 
             val isActive = item.id == activeConfigId
             tvActive.visibility = if (isActive) View.VISIBLE else View.GONE
             tvActive.text = getString(R.string.active_config_label)
 
             btnFavorite.setTextColor(
-                if (item.isFavorite) getColor(R.color.connecting) else getColor(R.color.disconnected)
+                if (item.isFavorite) getColor(R.color.connecting)
+                else                 getColor(R.color.disconnected)
             )
             btnFavorite.setOnClickListener {
                 lifecycleScope.launch {
-                    if (!item.isFavorite && configDao.getFavoriteCount(currentUserId.value) >= 10) {
+                    if (!item.isFavorite &&
+                        configDao.getFavoriteCount(currentUserId) >= 10
+                    ) {
                         showToast(R.string.favorite_limit_reached)
                         return@launch
                     }
-                    configDao.setFavorite(item.id, currentUserId.value, !item.isFavorite)
+                    configDao.setFavorite(item.id, currentUserId, !item.isFavorite)
                 }
             }
 
             btnDelete.visibility = if (item.source == "manual") View.VISIBLE else View.GONE
             btnDelete.setOnClickListener {
-                val messageRes = if (isActive) {
+                val message = if (isActive)
                     getString(R.string.delete_active_config_message, item.name)
-                } else {
+                else
                     getString(R.string.delete_config_message, item.name)
-                }
+
                 AlertDialog.Builder(this@ConfigSelectionActivity)
                     .setTitle(R.string.delete_config_title)
-                    .setMessage(messageRes)
+                    .setMessage(message)
                     .setPositiveButton(R.string.delete) { _, _ ->
                         lifecycleScope.launch {
-                            configDao.deleteManualById(item.id, currentUserId.value)
+                            configDao.deleteManualById(item.id, currentUserId)
                         }
                     }
                     .setNegativeButton(android.R.string.cancel, null)

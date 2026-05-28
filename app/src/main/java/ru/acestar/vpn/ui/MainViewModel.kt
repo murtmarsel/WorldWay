@@ -1,69 +1,69 @@
 package ru.acestar.vpn.ui
 
+import android.app.Activity
 import android.app.Application
-import android.widget.Toast
-import androidx.activity.viewModels
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import ru.acestar.vpn.R
 import ru.acestar.vpn.VpnApplication
-import ru.acestar.vpn.data.dao.VpnServerConfigDao
 import ru.acestar.vpn.data.model.User
 import ru.acestar.vpn.data.model.VpnConfigEntity
 import ru.acestar.vpn.data.model.VpnServerConfigEntity
 import ru.acestar.vpn.data.repository.SessionManager
-import ru.acestar.vpn.data.repository.UserRepository
 import ru.acestar.vpn.vpn.OpenVpnManager
 import ru.acestar.vpn.vpn.VpnConnectionState
+import ru.acestar.vpn.vpn.VpnManagerInterface
+import ru.acestar.vpn.vpn.WireGuardManager
 import java.io.ByteArrayInputStream
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
-import kotlin.getValue
+
+enum class ActiveVpnProtocol { NONE, OPENVPN, WIREGUARD }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-
-    private val _connectionAttemptState = MutableStateFlow<ConnectionAttemptState>(ConnectionAttemptState.Idle)
-    val connectionAttemptState: StateFlow<ConnectionAttemptState> = _connectionAttemptState.asStateFlow()
-    private var _isServerConfigsLoaded = MutableStateFlow(false)
-    var isServerConfigsLoaded: StateFlow<Boolean> = _isServerConfigsLoaded.asStateFlow()
-
-    private var configsQueue: List<VpnServerConfigEntity> = emptyList()
-
-    private val vpnServerConfigDao = (application as VpnApplication).database.vpnServerConfigDao()
-    private var currentAttemptIndex = 0
-    private var isAttemptingConnection = false
-
-    sealed class ConnectionAttemptState {
-        object Idle : ConnectionAttemptState()
-        data class Trying(val current: Int, val total: Int, val configName: String) : ConnectionAttemptState()
-        data class Success(val config: VpnServerConfigEntity) : ConnectionAttemptState()
-        data class Failed(val message: String) : ConnectionAttemptState()
-        object AllFailed : ConnectionAttemptState()
-    }
-
-
     companion object {
-        /** Показать напоминание о подписке, если осталось меньше 7 дней. */
         const val SUBSCRIPTION_WARN_MS = 1L * 24L * 60L * 60L * 1000L
     }
 
+    // ─── Менеджеры ───────────────────────────────────────────────────────────
+    val vpnManager:       OpenVpnManager  = OpenVpnManager.getInstance(application)
+    val wireGuardManager: WireGuardManager = WireGuardManager.getInstance(application)
 
-    private val database = (application as VpnApplication).database
-    private val userRepository = UserRepository(database.userDao())
-    private val vpnConfigDao = database.vpnConfigDao()
-    private val sessionManager = SessionManager.getInstance(application)
+    // ─── Активный протокол ───────────────────────────────────────────────────
+    private val _activeProtocol = MutableStateFlow(ActiveVpnProtocol.NONE)
+    val activeProtocol: StateFlow<ActiveVpnProtocol> = _activeProtocol.asStateFlow()
+
+    // ─── Проксированные потоки UI ────────────────────────────────────────────
+    private val _connectionState = MutableStateFlow(VpnConnectionState.DISCONNECTED)
+    val connectionState: StateFlow<VpnConnectionState> = _connectionState.asStateFlow()
+
+    private val _statusMessage = MutableStateFlow("")
+    val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
+
+    private val _byteCountIn = MutableStateFlow(0L)
+    val byteCountIn: StateFlow<Long> = _byteCountIn.asStateFlow()
+
+    private val _byteCountOut = MutableStateFlow(0L)
+    val byteCountOut: StateFlow<Long> = _byteCountOut.asStateFlow()
+
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
+    private var protocolObserverJob: Job? = null
+
+    // ─── БД / сессия ─────────────────────────────────────────────────────────
+    private val database           = (application as VpnApplication).database
+    private val vpnConfigDao       = database.vpnConfigDao()
+    private val vpnServerConfigDao = database.vpnServerConfigDao()
+    private val sessionManager     = SessionManager.getInstance(application)
+
     private var currentUserId = -1L
-    val vpnManager = OpenVpnManager.getInstance(application)
 
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
@@ -71,333 +71,316 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _configLoaded = MutableStateFlow(false)
     val configLoaded: StateFlow<Boolean> = _configLoaded.asStateFlow()
 
-    val connectionState: StateFlow<VpnConnectionState> = vpnManager.connectionState
-    val statusMessage: StateFlow<String> = vpnManager.statusMessage
-    val byteCountIn: StateFlow<Long> = vpnManager.byteCountIn
-    val byteCountOut: StateFlow<Long> = vpnManager.byteCountOut
-    val isPaused: StateFlow<Boolean> = vpnManager.isPaused
-
     private val _vpnConfigs = MutableStateFlow<List<VpnConfigEntity>>(emptyList())
     val vpnConfigs: StateFlow<List<VpnConfigEntity>> = _vpnConfigs.asStateFlow()
 
+    // ─── Авто-режим ──────────────────────────────────────────────────────────
+    private val _autoModeState = MutableStateFlow<AutoModeState>(AutoModeState.Idle)
+    val autoModeState: StateFlow<AutoModeState> = _autoModeState.asStateFlow()
+
+    private var autoQueue: List<VpnServerConfigEntity> = emptyList()
+    private var autoIndex  = 0
+    private var autoActive = false
+    private var autoJob: Job? = null
+
+    sealed class AutoModeState {
+        object Idle : AutoModeState()
+        data class Trying(
+            val index: Int,
+            val total: Int,
+            val name:  String,
+            val type:  String
+        ) : AutoModeState()
+        data class Connected(val config: VpnServerConfigEntity) : AutoModeState()
+        object AllFailed : AutoModeState()
+    }
+
+    // ─── Init ─────────────────────────────────────────────────────────────────
     init {
         loadCurrentUser()
+        switchProtocolObserver(vpnManager) // слушаем OpenVPN по умолчанию
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ПЕРЕКЛЮЧЕНИЕ ПРОТОКОЛА
+    // Принимает VpnManagerInterface — никаких Unresolved reference.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    fun setActiveProtocol(protocol: ActiveVpnProtocol) {
+        if (_activeProtocol.value == protocol) return
+        _activeProtocol.value = protocol
+
+        val manager: VpnManagerInterface = when (protocol) {
+            ActiveVpnProtocol.WIREGUARD -> wireGuardManager
+            else                        -> vpnManager
+        }
+        switchProtocolObserver(manager)
+    }
+
+    /**
+     * Перенаправляет все 5 state-потоков из [manager] в поля ViewModel.
+     * Явный тип VpnManagerInterface — компилятор точно знает все поля.
+     */
+    private fun switchProtocolObserver(manager: VpnManagerInterface) {
+        protocolObserverJob?.cancel()
+        protocolObserverJob = viewModelScope.launch {
+            val jobs = listOf(
+                launch { manager.connectionState.collectLatest { _connectionState.value = it } },
+                launch { manager.statusMessage.collectLatest   { _statusMessage.value  = it } },
+                launch { manager.byteCountIn.collectLatest     { _byteCountIn.value    = it } },
+                launch { manager.byteCountOut.collectLatest    { _byteCountOut.value   = it } },
+                launch { manager.isPaused.collectLatest        { _isPaused.value       = it } }
+            )
+            try {
+                awaitCancellation()
+            } finally {
+                jobs.forEach { it.cancel() }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // АВТО-РЕЖИМ
+    // Перебирает vpn_server_configs. Поле type определяет менеджер.
+    // ═══════════════════════════════════════════════════════════════════════
+
+    fun startAutoMode(activity: Activity) {
+        if (autoActive) return
+        stopAutoMode()
+
+        autoJob = viewModelScope.launch {
+            autoActive = true
+            autoIndex  = 0
+            _autoModeState.value = AutoModeState.Idle
+
+            val configs = vpnServerConfigDao.getAllByOrder(currentUserId)
+
+            if (configs.isEmpty()) {
+                _autoModeState.value = AutoModeState.AllFailed
+                autoActive = false
+                return@launch
+            }
+
+            autoQueue = configs
+
+            // Линейный перебор без рекурсии — одна корутина, один цикл
+            while (autoIndex < autoQueue.size && autoActive) {
+                val config = autoQueue[autoIndex]
+
+                _autoModeState.value = AutoModeState.Trying(
+                    index = autoIndex + 1,
+                    total = autoQueue.size,
+                    name  = config.name,
+                    type  = config.type
+                )
+
+                // 1. Отключаем предыдущее и ждём полного отключения
+                val prevManager = activeManager()
+                if (_connectionState.value != VpnConnectionState.DISCONNECTED) {
+                    prevManager.disconnect()
+                    waitForDisconnect(timeoutMs = 8_000)
+                }
+
+                // 2. Переключаем протокол и грузим конфиг
+                val loaded = when (config.type.lowercase()) {
+                    "wireguard" -> {
+                        setActiveProtocol(ActiveVpnProtocol.WIREGUARD)
+                        wireGuardManager.loadConfig(config.content, config.name)
+                    }
+                    "openvpn" -> {
+                        setActiveProtocol(ActiveVpnProtocol.OPENVPN)
+                        vpnManager.loadConfigFromInputStream(
+                            ByteArrayInputStream(config.content.toByteArray()),
+                            config.name
+                        )
+                    }
+                    else -> false
+                }
+
+                if (!loaded) {
+                    // Конфиг не распарсился — сразу к следующему
+                    autoIndex++
+                    continue
+                }
+
+                // 3. Небольшая пауза после смены протокола
+                delay(400)
+
+                // 4. Подключаем
+                activeManager().connect(activity)
+
+                // 5. Ждём результата (таймаут 20 сек)
+                val success = waitForConnectionResult(timeoutMs = 20_000)
+
+                if (success) {
+                    _autoModeState.value = AutoModeState.Connected(config)
+                    onConfigLoaded()
+                    autoActive = false
+                    return@launch
+                }
+
+                // Подключение не удалось — переходим к следующему
+                autoIndex++
+            }
+
+            // Все конфиги перебраны без успеха
+            if (autoActive) {
+                _autoModeState.value = AutoModeState.AllFailed
+                autoActive = false
+            }
+        }
+    }
+
+    /**
+     * Ждёт перехода в DISCONNECTED или истечения таймаута.
+     * Нужно чтобы не начинать следующую попытку пока предыдущий туннель ещё закрывается.
+     */
+    private suspend fun waitForDisconnect(timeoutMs: Long) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (_connectionState.value == VpnConnectionState.DISCONNECTED) return
+            delay(300)
+        }
+        // Таймаут — принудительно считаем отключённым и продолжаем
+    }
+
+    /**
+     * Ждёт CONNECTED, ERROR или DISCONNECTED (неожиданный обрыв).
+     * DISCONNECTING и CONNECTING — промежуточные состояния, продолжаем ждать.
+     */
+    private suspend fun waitForConnectionResult(timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            when (_connectionState.value) {
+                VpnConnectionState.CONNECTED    -> return true
+                VpnConnectionState.ERROR        -> return false
+                // DISCONNECTED во время ожидания подключения = обрыв/отказ
+                VpnConnectionState.DISCONNECTED -> {
+                    // Даём небольшую паузу на случай кратковременного DISCONNECTED
+                    // при смене состояния (race condition между disconnect и connect)
+                    delay(800)
+                    if (_connectionState.value == VpnConnectionState.DISCONNECTED) return false
+                }
+                else -> delay(500) // CONNECTING / DISCONNECTING — ждём
+            }
+        }
+        return false // таймаут
+    }
+
+    fun stopAutoMode() {
+        autoJob?.cancel()
+        autoJob    = null
+        autoActive = false
+        autoIndex  = 0
+        _autoModeState.value = AutoModeState.Idle
+    }
+
+    val isAutoModeActive: Boolean get() = autoActive
+
+    /** Возвращает текущий активный менеджер как VpnManagerInterface. */
+    private fun activeManager(): VpnManagerInterface =
+        if (_activeProtocol.value == ActiveVpnProtocol.WIREGUARD) wireGuardManager else vpnManager
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // РУЧНОЕ ПОДКЛЮЧЕНИЕ
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Загружает конфиг из vpn_configs (поле type = "OpenVPN" | "WireGuard").
+     * Переключает activeProtocol автоматически.
+     * Вызывается при выборе избранного или конфига из списка.
+     */
+    fun loadUserConfig(content: String, name: String, type: String): Boolean {
+        return when (type.lowercase()) {
+            "wireguard" -> {
+                setActiveProtocol(ActiveVpnProtocol.WIREGUARD)
+                wireGuardManager.loadConfig(content, name)
+            }
+            "openvpn" -> {
+                setActiveProtocol(ActiveVpnProtocol.OPENVPN)
+                vpnManager.loadConfigFromInputStream(
+                    ByteArrayInputStream(content.toByteArray()),
+                    name
+                )
+            }
+            else -> false
+        }
+    }
+
+    /**
+     * Подключает активный менеджер.
+     * Кнопка "Подключиться" в MainActivity.
+     */
+    fun connectActive(activity: Activity) {
+        if (_activeProtocol.value == ActiveVpnProtocol.NONE) return
+        activeManager().connect(activity)
+    }
+
+    /**
+     * Отключает активный менеджер + сбрасывает авто-режим.
+     * Кнопка "Отключить" в MainActivity.
+     */
+    fun disconnectActive() {
+        stopAutoMode()
+        activeManager().disconnect()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CONFIG LOADED
+    // ═══════════════════════════════════════════════════════════════════════
+
+    fun onConfigLoaded()    { _configLoaded.value = true  }
+    fun clearConfigLoaded() { _configLoaded.value = false }
+
+    /**
+     * Вызывается при onResume: если VPN уже подключён (состояние восстановлено из менеджера),
+     * помечаем configLoaded = true чтобы кнопка "Подключиться" была активна.
+     */
+    fun restoreConfigLoadedIfConnected() {
+        if (_connectionState.value == VpnConnectionState.CONNECTED) {
+            _configLoaded.value = true
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ПОЛЬЗОВАТЕЛЬ
+    // ═══════════════════════════════════════════════════════════════════════
+
     private fun loadCurrentUser() {
         viewModelScope.launch {
             val user = sessionManager.getCurrentUser()
-            val userId = user?.id ?: -1L
-            currentUserId = userId
+            currentUserId = user?.id ?: -1L
             observeVpnConfigs()
-            ensureServerPlaceholders()
         }
-
-        // Подписываемся на SessionManager — единственный источник правды
         viewModelScope.launch {
-            sessionManager.currentUser.collectLatest { user ->
-                _currentUser.value = user
-            }
-        }
-    }
-    private fun updateCurrentUser(){
-        viewModelScope.launch {
-
-            currentUserId
-        }
-    }
-    suspend fun loadServerConfigsAndWait(userId: Long): Boolean {
-        return suspendCoroutine { continuation ->
-            var finished = false
-
-            // Подписываемся на изменения
-            val job = viewModelScope.launch {
-                var res = isServerConfigsLoaded.first { it }
-
-                println("isServerConfigsLoaded: ${res}")
-                if (res && !finished) {
-                    finished = true
-                    continuation.resume(true)
-                }
-
-            }
-
-            // Запускаем загрузку
-            connectToFirstAvailable(userId) {
-                if (!finished) {
-                    finished = true
-                    job.cancel()
-                    continuation.resume(false)
-                }
-            }
-
-
-            // Таймаут на всякий случай
-            viewModelScope.launch {
-//                delay(6000) // 30 секунд таймаут
-                if (!finished) {
-                    finished = true
-                    job.cancel()
-                    continuation.resume(false)
-                }
-            }
+            sessionManager.currentUser.collectLatest { _currentUser.value = it }
         }
     }
 
-    /**
-     * Получение всех конфигураций в порядке приоритета
-     */
-//    fun getConfigsInOrder(userId: Long): List<VpnServerConfigEntity> {
-//        return vpnServerConfigDao.observeAllByOrder(userId)
-//    }
+    fun refreshUser() = loadCurrentUser()
 
-    /**
-     * Подключение к первой доступной конфигурации
-     */
-    fun connectToFirstAvailable(userId: Long, onAllFailed: () -> Unit) {
-        if (isAttemptingConnection) {
-            println("⚠️ Уже выполняется подключение")
-            return
-        }
+    fun hasActiveSubscription(): Boolean =
+        _currentUser.value?.hasActiveSubscription() == true
 
-        viewModelScope.launch {
-            isAttemptingConnection = true
-            _connectionAttemptState.value = ConnectionAttemptState.Idle
+    fun shouldShowEmailUnconfirmedBanner(): Boolean =
+        _currentUser.value?.let { !it.emailConfirmed } == true
 
-            // Получаем конфигурации в порядке приоритета
-            vpnServerConfigDao.observeAllByOrder(userId).collect { configs ->
-                if (configs.isEmpty()) {
-                    _connectionAttemptState.value = ConnectionAttemptState.Failed("Нет доступных конфигураций")
-                    isAttemptingConnection = false
-                    onAllFailed()
-                    isServerConfigsLoaded = MutableStateFlow(false)
-                    println("Конфигации загружены? (false): ${isServerConfigsLoaded.value}")
-                    return@collect
-
-                }
-
-                isServerConfigsLoaded = MutableStateFlow(true)
-                println("Конфигации загружены? (true): ${isServerConfigsLoaded.value}")
-
-                configsQueue = configs
-                currentAttemptIndex = 0
-
-                // Начинаем попытку подключения
-                tryConnectNextConfig()
-
-                // Прерываем сбор, так как нам нужна только одна попытка
-                return@collect
-            }
-        }
-    }
-
-    /**
-     * Попытка подключения к следующей конфигурации
-     */
-    fun tryConnectNextConfig() {
-        if (currentAttemptIndex >= configsQueue.size) {
-            // Все конфигурации перебраны, ни одна не подошла
-            _connectionAttemptState.value = ConnectionAttemptState.AllFailed
-            isAttemptingConnection = false
-            onAllConfigsFailed()
-            return
-        }
-
-        val config = configsQueue[currentAttemptIndex]
-        _connectionAttemptState.value = ConnectionAttemptState.Trying(
-            current = currentAttemptIndex + 1,
-            total = configsQueue.size,
-            configName = config.name
-        )
-
-        // Пытаемся подключиться
-        attemptConnection(config)
-    }
-
-    /**
-     * Попытка подключения к конкретной конфигурации
-     */
-    private fun attemptConnection(config: VpnServerConfigEntity) {
-        viewModelScope.launch {
-            try {
-                val configName = "${currentAttemptIndex}"
-                // Загружаем конфигурацию
-                val success = loadConfig(config.content, configName)
-
-                if (success) {
-                    // Проверяем подключение
-                    val connectionResult = checkConnection()
-
-                    if (connectionResult) {
-                        // Подключение успешно
-                        _connectionAttemptState.value = ConnectionAttemptState.Success(config)
-                        isAttemptingConnection = false
-                        return@launch
-                    } else {
-                        // Подключение не удалось, переходим к следующему
-                        println("❌ Не удалось подключиться к ${config.name}, пробуем следующий...")
-                        currentAttemptIndex++
-                        tryConnectNextConfig()
-                    }
-                } else {
-                    // Ошибка загрузки конфигурации
-                    println("❌ Ошибка загрузки конфигурации ${config.name}")
-                    currentAttemptIndex++
-                    tryConnectNextConfig()
-                }
-            } catch (e: Exception) {
-                println("❌ Исключение при подключении к ${config.name}: ${e.message}")
-                currentAttemptIndex++
-                tryConnectNextConfig()
-            }
-        }
-    }
-
-    private fun loadConfig(content: String, serverName: String): Boolean {
-        val success = vpnManager.loadConfigFromInputStream(
-            ByteArrayInputStream(content.toByteArray()),
-            serverName
-        )
-        if (success) {
-            onConfigLoaded()
-            return true
-//            showToast(R.string.config_loaded)
-        } else {
-//            showToast("Ошибка загрузки конфигурации")
-            return false
-        }
-    }
-    /**
-     * Проверка подключения (например, пинг до сервера)
-     */
-    private suspend fun checkConnection(): Boolean {
-        try {
-            // Здесь логика проверки подключения
-            // Например, пинг до 8.8.8.8 или до VPN сервера
-            val process = Runtime.getRuntime().exec("ping -c 1 -W 2 8.8.8.8")
-            val exitCode = process.waitFor()
-            exitCode == 0
-            return true
-        } catch (e: Exception) {
-            return false
-        }
-    }
-
-    /**
-     * Обработка случая, когда все конфигурации не работают
-     */
-    private fun onAllConfigsFailed() {
-        println("❌ Все конфигурации не работают")
-        // Вызываем отдельную функцию
-        showNoConnectionAvailable()
-    }
-
-    private fun showNoConnectionAvailable() {
-        // Ваша логика при отсутствии подключения
-        // Например, показать диалог или уведомление
-    }
-
-    fun resetAttemptState() {
-        isAttemptingConnection = false
-        _connectionAttemptState.value = ConnectionAttemptState.Idle
-    }
-
-
-
-
-    fun onConfigLoaded() {
-        _configLoaded.value = true
-    }
-
-    fun clearConfigLoaded() {
-        _configLoaded.value = false
-    }
-
-    fun hasActiveSubscription(): Boolean {
-        return _currentUser.value?.hasActiveSubscription() == true
-    }
-
-    /** Почта не подтверждена по данным локального профиля. */
-    fun shouldShowEmailUnconfirmedBanner(): Boolean {
-        return _currentUser.value?.let { !it.emailConfirmed } == true
-    }
-
-    /** Нет подписки или скоро истечёт (в пределах [SUBSCRIPTION_WARN_MS]). */
     fun shouldShowSubscriptionWarningBanner(): Boolean {
         val u = _currentUser.value ?: return false
-        if (!u.hasActiveSubscription()) return true
-        return u.subscriptionExpiresWithin(SUBSCRIPTION_WARN_MS)
+        return !u.hasActiveSubscription() || u.subscriptionExpiresWithin(SUBSCRIPTION_WARN_MS)
     }
 
-//    fun logout() {
-//        sessionManager.clearSession()
-//        _currentUser.value = null
-//    }
-
-    fun refreshUser() {
-        loadCurrentUser()
-    }
+    // ═══════════════════════════════════════════════════════════════════════
+    // VPN CONFIGS (пользовательские — vpn_configs)
+    // ═══════════════════════════════════════════════════════════════════════
 
     private fun observeVpnConfigs() {
         if (currentUserId == -1L) return
         viewModelScope.launch {
-            vpnConfigDao.observeAllByUser(currentUserId).collectLatest { configs ->
-                _vpnConfigs.value = configs
+            vpnConfigDao.observeAllByUser(currentUserId).collectLatest {
+                _vpnConfigs.value = it
             }
         }
-    }
-
-    private fun ensureServerPlaceholders() {
-        if (currentUserId == -1L) return
-        viewModelScope.launch {
-            val source = "server_placeholder"
-//            println("СС:${vpnConfigDao.countBySource(currentUserId, source)}")
-//            if (vpnConfigDao.countBySource(currentUserId, source) == 0) {
-//                vpnConfigDao.insert(
-//                    VpnConfigEntity(
-//                        userId = currentUserId,
-//                        name = "Сервер 1",
-//                        serverHost = "-",
-//                        configContent = "",
-//                        source = source
-//                    )
-//                )
-//                vpnConfigDao.insert(
-//                    VpnConfigEntity(
-//                        userId = currentUserId,
-//                        name = "Сервер 2",
-//                        serverHost = "-",
-//                        configContent = "",
-//                        source = source
-//                    )
-//                )
-//            }
-        }
-    }
-
-    suspend fun saveManualConfig(name: String, serverHost: String, configContent: String): Long {
-        if (currentUserId == -1L) return -1L
-        return vpnConfigDao.insert(
-            VpnConfigEntity(
-                userId = currentUserId,
-                name = name,
-                serverHost = serverHost,
-                configContent = configContent,
-                source = "manual"
-            )
-        )
-    }
-
-    suspend fun saveServerConfig(name: String, serverHost: String, configContent: String): Long {
-        if (currentUserId == -1L) return -1L
-        return vpnConfigDao.insert(
-            VpnConfigEntity(
-                userId = currentUserId,
-                name = name,
-                serverHost = serverHost,
-                configContent = configContent,
-                source = "server"
-            )
-        )
     }
 
     suspend fun getConfigById(id: Long): VpnConfigEntity? {

@@ -32,25 +32,25 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.StringReader
 
-class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, VpnStatus.ByteCountListener {
+class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, VpnStatus.ByteCountListener, VpnManagerInterface {
     private val managerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var forceDisconnectJob: Job? = null
     private val runtimePrefs = context.getSharedPreferences("vpn_runtime_state", Context.MODE_PRIVATE)
 
     private val _connectionState = MutableStateFlow(VpnConnectionState.DISCONNECTED)
-    val connectionState: StateFlow<VpnConnectionState> = _connectionState.asStateFlow()
+    override  val connectionState: StateFlow<VpnConnectionState> = _connectionState.asStateFlow()
 
     private val _statusMessage = MutableStateFlow("")
-    val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
+    override  val statusMessage: StateFlow<String> = _statusMessage.asStateFlow()
 
     private val _byteCountIn = MutableStateFlow(0L)
-    val byteCountIn: StateFlow<Long> = _byteCountIn.asStateFlow()
+    override  val byteCountIn: StateFlow<Long> = _byteCountIn.asStateFlow()
 
     private val _byteCountOut = MutableStateFlow(0L)
-    val byteCountOut: StateFlow<Long> = _byteCountOut.asStateFlow()
+    override  val byteCountOut: StateFlow<Long> = _byteCountOut.asStateFlow()
 
     private val _isPaused = MutableStateFlow(false)
-    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+    override  val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
 
     private var rawConfigContent: String? = null
     private var currentConfigContent: String? = null
@@ -185,7 +185,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         }
     }
 
-    fun connect(activity: Activity) {
+    override fun connect(activity: Activity) {
         val vp = vpnProfile
         if (vp == null) {
             _statusMessage.value = "Конфигурация не загружена"
@@ -223,7 +223,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         try {
             _isPaused.value = false
             _connectionState.value = VpnConnectionState.DISCONNECTING
@@ -260,7 +260,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         }
     }
 
-    fun isConnected(): Boolean = _connectionState.value == VpnConnectionState.CONNECTED
+    override fun isConnected(): Boolean = _connectionState.value == VpnConnectionState.CONNECTED
 
     fun togglePause() {
         if (_isPaused.value) {

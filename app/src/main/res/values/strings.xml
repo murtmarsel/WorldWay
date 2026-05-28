@@ -81,6 +81,9 @@
     <string name="favorite">Избранное</string>
     <string name="active_config_label">Текущая конфигурация</string>
     <string name="favorite_limit_reached">Можно добавить не более 10 избранных конфигураций</string>
+    <!-- Auto mode -->
+    <string name="auto_trying">Авто: %1$d/%2$d · %3$s</string>
+    <string name="auto_all_failed">Не удалось подключиться ни к одному серверу</string>
 
     <!-- Подписки   -->
 
