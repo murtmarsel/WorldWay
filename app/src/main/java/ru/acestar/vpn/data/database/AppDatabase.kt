@@ -5,6 +5,8 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import ru.acestar.vpn.data.dao.ConnectionStatsDao
 import ru.acestar.vpn.data.dao.SessionDao
 import ru.acestar.vpn.data.dao.UserDao
@@ -25,7 +27,7 @@ import ru.acestar.vpn.data.model.CurrentSession
         VpnServerConfigEntity::class,
         Session::class,
         CurrentSession::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -34,11 +36,20 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
     abstract fun connectionStatsDao(): ConnectionStatsDao
     abstract fun vpnConfigDao(): VpnConfigDao
-
     abstract fun vpnServerConfigDao(): VpnServerConfigDao
+
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        /** Добавляет колонку usedTrafficBytes в таблицу users */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE users ADD COLUMN usedTrafficBytes INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -46,7 +57,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "vpn_database"
-                ).build()
+                )
+                    .addMigrations(MIGRATION_5_6)
+                    .build()
                 INSTANCE = instance
                 instance
             }

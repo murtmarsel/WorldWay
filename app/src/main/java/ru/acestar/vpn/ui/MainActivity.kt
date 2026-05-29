@@ -218,6 +218,10 @@ class MainActivity : AppCompatActivity() {
             settingsLauncher.launch(Intent(this, SettingsActivity::class.java))
         }
 
+        binding.btnAccount.setOnClickListener {
+            startActivity(Intent(this, AccountActivity::class.java))
+        }
+
         binding.btnAdmin.setOnClickListener {
             // ✅ Проверяем, является ли пользователь админом
             lifecycleScope.launch {
@@ -242,7 +246,9 @@ class MainActivity : AppCompatActivity() {
 
         val needEmail = !user.emailConfirmed
         val needSub =
-            !user.hasActiveSubscription() || user.subscriptionExpiresWithin(MainViewModel.SUBSCRIPTION_WARN_MS) && (user.tariff != "Unlimited")
+            !user.hasActiveSubscription() ||
+            (user.subscriptionExpiresWithin(MainViewModel.SUBSCRIPTION_WARN_MS) && user.tariff != "Unlimited") ||
+            (user.trafficUsageRatio()?.let { it >= 0.8f } == true)
 
         if (!needEmail) emailReminderDismissedForSession = false
         if (!needSub) subscriptionReminderDismissedForSession = false
@@ -353,16 +359,22 @@ class MainActivity : AppCompatActivity() {
             viewModel.currentUser.collectLatest { user ->
                 if (user != null) {
                     binding.tvSubscription.visibility = View.VISIBLE
-//                    val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-//                    var endDate = dateFormat.format(user.subsEndDate)
-//                    println("Активная подписка: ${endDate}")
-//                    println("Активный пользователь: ${user}")
+                    val tariff = ru.acestar.vpn.data.model.Tariff.fromId(user.tariff)
                     if (user.hasActiveSubscription()) {
                         val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
-                        var endDate = dateFormat.format(user.subsEndDate)
-//                        println("Тариф пользователя: ${user.tariff}")
-                        if (user.tariff == "Unlimited") endDate = getString(R.string.subscription_active_unlimited)
-                        binding.tvSubscription.text = getString(R.string.subscription_active, endDate)
+                        val text = when {
+                            user.tariff == "Unlimited" ->
+                                "${tariff.displayName} · ${getString(R.string.subscription_active_unlimited)}"
+                            tariff.trafficLimitBytes != null -> {
+                                val used = ru.acestar.vpn.data.model.Tariff.formatUsed(user.usedTrafficBytes)
+                                val limit = ru.acestar.vpn.data.model.Tariff.formatTrafficLimit(tariff.trafficLimitBytes)
+                                "${tariff.displayName} · $used / $limit"
+                            }
+                            user.subsEndDate != null && user.subsEndDate > 0 ->
+                                "${tariff.displayName} · ${getString(R.string.subscription_active, dateFormat.format(user.subsEndDate))}"
+                            else -> tariff.displayName
+                        }
+                        binding.tvSubscription.text = text
                         binding.tvSubscription.setTextColor(
                             ContextCompat.getColor(this@MainActivity, R.color.connected)
                         )
@@ -479,6 +491,22 @@ class MainActivity : AppCompatActivity() {
                     getString(R.string.btn_pause)
                 }
                 refreshPauseButtonVisibility()
+            }
+        }
+
+        lifecycleScope.launch {
+            viewModel.trafficExhausted.collectLatest { exhausted ->
+                if (exhausted) {
+                    showToast(getString(R.string.notif_traffic_exhausted_title))
+                    MaterialAlertDialogBuilder(this@MainActivity)
+                        .setTitle(R.string.notif_traffic_exhausted_title)
+                        .setMessage(R.string.notif_traffic_exhausted_text)
+                        .setPositiveButton(R.string.subscription_extend) { _, _ ->
+                            startActivity(Intent(this@MainActivity, SubscriptionActivity::class.java))
+                        }
+                        .setNegativeButton(R.string.banner_close, null)
+                        .show()
+                }
             }
         }
     }

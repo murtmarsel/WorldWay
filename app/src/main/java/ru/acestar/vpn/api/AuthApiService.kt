@@ -473,6 +473,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             isActive = userData.optBoolean("isActive"),
                             isAdmin = userData.optBoolean("isAdmin"),
                             subsEndDate = subsEndDateTimestamp
+                            // usedTrafficBytes НЕ перезаписываем — берём из локальной БД
                         )
                         println("ISADMIN: ${user.isAdmin}")
 

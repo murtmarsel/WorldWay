@@ -104,6 +104,12 @@
             android:exported="false"
             android:theme="@style/Theme.VPN.NoActionBar"
             android:screenOrientation="portrait"/>
+
+        <activity
+            android:name=".ui.AccountActivity"
+            android:exported="false"
+            android:theme="@style/Theme.VPN.NoActionBar"
+            android:screenOrientation="portrait"/>
 <!--            <intent-filter>-->
 <!--                <action android:name="android.intent.action.VIEW" />-->
 <!--                <category android:name="android.intent.category.DEFAULT" />-->

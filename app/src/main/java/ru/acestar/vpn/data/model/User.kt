@@ -17,18 +17,45 @@ data class User(
     val isNew: Boolean = true,
     val isAdmin: Boolean = false,
     val isLoggedIn: Boolean = false,
-    val username: String? = null
+    val username: String? = null,
+    /** Суммарный использованный трафик за текущий период тарифа (байты) */
+    val usedTrafficBytes: Long = 0L
 ) {
     fun hasActiveSubscription(): Boolean {
-        val subs = subsEndDate?.let { it > System.currentTimeMillis()} ?: false
-        val tar = tariff == "Unlimited"
-        return subs or tar
+        val tariffObj = Tariff.fromId(tariff)
+        // Безлимитный тариф — всегда активен
+        if (tariff == "Unlimited") return true
+        // Тариф Hour — активен пока не исчерпан трафик
+        if (tariff == "Hour") return usedTrafficBytes < (tariffObj.trafficLimitBytes ?: Long.MAX_VALUE)
+        // Остальные — проверяем дату окончания
+        return subsEndDate?.let { it > System.currentTimeMillis() } ?: false
     }
 
     /** Подписка заканчивается в течение [warnWithinMs] мс. */
     fun subscriptionExpiresWithin(warnWithinMs: Long): Boolean {
-        return (subsEndDate?.let { it <= 0L})?: true
-        return subsEndDate?.let { it <= System.currentTimeMillis()}?: true
-        return subsEndDate?.let { it - System.currentTimeMillis() <= warnWithinMs}?: true
+        if (tariff == "Unlimited") return false
+        return subsEndDate?.let { end ->
+            val remaining = end - System.currentTimeMillis()
+            remaining in 0..warnWithinMs
+        } ?: true
+    }
+
+    /** Процент использованного трафика (0..1). null если безлимит. */
+    fun trafficUsageRatio(): Float? {
+        val limit = Tariff.fromId(tariff).trafficLimitBytes ?: return null
+        if (limit <= 0) return null
+        return (usedTrafficBytes.toFloat() / limit).coerceIn(0f, 1f)
+    }
+
+    /** Остаток трафика в байтах. null если безлимит. */
+    fun remainingTrafficBytes(): Long? {
+        val limit = Tariff.fromId(tariff).trafficLimitBytes ?: return null
+        return (limit - usedTrafficBytes).coerceAtLeast(0L)
+    }
+
+    /** Трафик исчерпан (для тарифов с лимитом). */
+    fun isTrafficExhausted(): Boolean {
+        val limit = Tariff.fromId(tariff).trafficLimitBytes ?: return false
+        return usedTrafficBytes >= limit
     }
 }

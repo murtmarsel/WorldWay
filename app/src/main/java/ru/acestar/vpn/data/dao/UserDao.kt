@@ -30,6 +30,15 @@ interface UserDao {
         WHERE id = :id""")
     suspend fun updateUser(id: Long, email: String?, isConfirmed: Boolean,
                            tariff: String, isNew: Boolean, isActive: Boolean, subsEndDate: Long?)
+
+    @Query("UPDATE users SET usedTrafficBytes = usedTrafficBytes + :bytes WHERE id = :userId")
+    suspend fun addUsedTraffic(userId: Long, bytes: Long)
+
+    @Query("UPDATE users SET usedTrafficBytes = 0 WHERE id = :userId")
+    suspend fun resetUsedTraffic(userId: Long)
+
+    @Query("SELECT usedTrafficBytes FROM users WHERE id = :userId")
+    suspend fun getUsedTraffic(userId: Long): Long?
     @Update
     suspend fun update(user: User)
 

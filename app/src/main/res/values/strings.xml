@@ -198,4 +198,63 @@
     <string name="logout_confirm">Вы уверены, что хотите выйти из системы?</string>
     <string name="logout_yes">Да, выйти</string>
     <string name="logout_no">Нет</string>
+
+    <!-- Account screen -->
+    <string name="account_title">Аккаунт</string>
+    <string name="account_registered">Дата регистрации</string>
+    <string name="account_user_id">ID пользователя</string>
+    <string name="account_current_tariff">Текущий тариф</string>
+    <string name="account_active">Активен</string>
+    <string name="account_expired">Истёк</string>
+    <string name="account_valid_until">Действует до</string>
+    <string name="account_by_traffic">По трафику</string>
+    <string name="account_traffic_used">Использовано трафика</string>
+    <string name="account_traffic_remaining_fmt">Осталось: %1$s</string>
+    <string name="account_unlimited_traffic">Безлимитный трафик</string>
+    <string name="account_stats_title">Статистика</string>
+    <string name="account_stats_received">Получено всего</string>
+    <string name="account_stats_sent">Отправлено всего</string>
+    <string name="account_stats_sessions">Сессий</string>
+
+    <!-- Tariffs -->
+    <string name="tariff_basic_name">Basic</string>
+    <string name="tariff_basic_desc">3 ГБ трафика · месяц или год</string>
+    <string name="tariff_basic_price_month">199 ₽</string>
+    <string name="tariff_advanced_name">Advanced</string>
+    <string name="tariff_advanced_desc">10 ГБ трафика · месяц или год</string>
+    <string name="tariff_advanced_price_month">349 ₽</string>
+    <string name="tariff_premium_name">Premium</string>
+    <string name="tariff_premium_desc">Безлимитный трафик · год</string>
+    <string name="tariff_premium_price_year">4 990 ₽</string>
+    <string name="tariff_hour_name">Часовой (Hour)</string>
+    <string name="tariff_hour_desc">1 ГБ трафика за просмотр рекламы</string>
+    <string name="tariff_per_month">/ месяц</string>
+    <string name="tariff_per_year">/ год</string>
+    <string name="tariff_buy_month">Месяц</string>
+    <string name="tariff_buy_year">Год</string>
+
+    <!-- Payment -->
+    <string name="payment_creating">Создание платежа…</string>
+    <string name="payment_redirecting">Переход на страницу оплаты…</string>
+    <string name="payment_success">Платёж успешно завершён!</string>
+    <string name="payment_checking">Проверка статуса платежа…</string>
+    <string name="payment_not_completed">Платёж не был завершён</string>
+    <string name="payment_cancelled">Оплата отменена</string>
+    <string name="payment_details_fmt">Сумма: %1$s %2$s</string>
+    <string name="payment_desc_monthly">%1$s — месячная подписка</string>
+    <string name="payment_desc_yearly">%1$s — годовая подписка</string>
+    <string name="payment_starting_fmt">Оформление подписки за %1$s ₽</string>
+    <string name="error_title">Ошибка</string>
+    <string name="ad_loading">Загрузка рекламы…</string>
+    <string name="restore_purchases_stub">Восстановление покупок…</string>
+
+    <!-- Traffic / subscription notifications -->
+    <string name="notif_channel_name">Тариф и трафик</string>
+    <string name="notif_channel_desc">Уведомления об использовании трафика и сроке тарифа</string>
+    <string name="notif_traffic_80_title">Трафик заканчивается</string>
+    <string name="notif_traffic_80_text">Использовано 80%% трафика. Осталось: %1$s</string>
+    <string name="notif_traffic_exhausted_title">Трафик исчерпан</string>
+    <string name="notif_traffic_exhausted_text">Лимит трафика по тарифу исчерпан. Подключение отключено. Продлите подписку для продолжения.</string>
+    <string name="notif_expiry_title">Подписка истекает</string>
+    <string name="notif_expiry_text">Срок действия вашей подписки истекает менее чем через 24 часа. Продлите, чтобы не потерять доступ.</string>
 </resources>

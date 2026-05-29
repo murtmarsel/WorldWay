@@ -62,6 +62,15 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/settings"
             android:src="@android:drawable/ic_menu_preferences" />
+
+        <ImageButton
+            android:id="@+id/btnAccount"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="4dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/account_title"
+            android:src="@android:drawable/ic_menu_myplaces" />
     </LinearLayout>
 
     <!-- VPN Icon -->

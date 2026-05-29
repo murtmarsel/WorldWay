@@ -2,6 +2,12 @@ package ru.acestar.vpn.ui
 
 import android.app.Activity
 import android.app.Application
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.Context
+import android.os.Build
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -12,7 +18,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import ru.acestar.vpn.R
 import ru.acestar.vpn.VpnApplication
+import ru.acestar.vpn.data.model.Tariff
 import ru.acestar.vpn.data.model.User
 import ru.acestar.vpn.data.model.VpnConfigEntity
 import ru.acestar.vpn.data.model.VpnServerConfigEntity
@@ -29,6 +37,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val SUBSCRIPTION_WARN_MS = 1L * 24L * 60L * 60L * 1000L
+        private const val NOTIF_CHANNEL_ID = "vpn_tariff"
+        private const val NOTIF_ID_TRAFFIC_80  = 1001
+        private const val NOTIF_ID_TRAFFIC_100 = 1002
+        private const val NOTIF_ID_EXPIRY      = 1003
     }
 
     // ─── Менеджеры ───────────────────────────────────────────────────────────
@@ -61,6 +73,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val database           = (application as VpnApplication).database
     private val vpnConfigDao       = database.vpnConfigDao()
     private val vpnServerConfigDao = database.vpnServerConfigDao()
+    private val userDao            = database.userDao()
     private val sessionManager     = SessionManager.getInstance(application)
 
     private var currentUserId = -1L
@@ -73,6 +86,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _vpnConfigs = MutableStateFlow<List<VpnConfigEntity>>(emptyList())
     val vpnConfigs: StateFlow<List<VpnConfigEntity>> = _vpnConfigs.asStateFlow()
+
+    // ─── Контроль трафика ────────────────────────────────────────────────────
+    /** Трафик исчерпан — нужно отключить VPN */
+    private val _trafficExhausted = MutableStateFlow(false)
+    val trafficExhausted: StateFlow<Boolean> = _trafficExhausted.asStateFlow()
+
+    /** Флаги уже отправленных уведомлений (сбрасываются при смене тарифа) */
+    private var notified80Percent = false
+    private var notified100Percent = false
+    private var notifiedExpiry = false
+
+    /** Байты трафика на момент начала текущей сессии подключения */
+    private var sessionStartBytes = 0L
+    private var trafficMonitorJob: Job? = null
 
     // ─── Авто-режим ──────────────────────────────────────────────────────────
     private val _autoModeState = MutableStateFlow<AutoModeState>(AutoModeState.Idle)
@@ -99,6 +126,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         loadCurrentUser()
         switchProtocolObserver(vpnManager) // слушаем OpenVPN по умолчанию
+        createNotificationChannel()
+        observeConnectionForTraffic()
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -185,13 +214,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val loaded = when (config.type.lowercase()) {
                     "wireguard" -> {
                         setActiveProtocol(ActiveVpnProtocol.WIREGUARD)
-                        wireGuardManager.loadConfig(config.content, config.name)
+                        wireGuardManager.loadConfig(config.content, "Авто W")
                     }
                     "openvpn" -> {
                         setActiveProtocol(ActiveVpnProtocol.OPENVPN)
                         vpnManager.loadConfigFromInputStream(
                             ByteArrayInputStream(config.content.toByteArray()),
-                            config.name
+                            "Авто O"
                         )
                     }
                     else -> false
@@ -357,7 +386,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun refreshUser() = loadCurrentUser()
+    fun refreshUser() {
+        viewModelScope.launch {
+            // Сначала убеждаемся что userId известен
+            if (currentUserId == -1L) {
+                val session = sessionManager.getCurrentUser()
+                currentUserId = session?.id ?: -1L
+            }
+            // Читаем из БД — там актуальный usedTrafficBytes
+            if (currentUserId > 0) {
+                val dbUser = userDao.getUserById(currentUserId)
+                if (dbUser != null) {
+                    _currentUser.value = dbUser
+                    sessionManager.updateCurrentUser(dbUser)
+                    if (_vpnConfigs.value.isEmpty()) observeVpnConfigs()
+                    return@launch
+                }
+            }
+            loadCurrentUser()
+        }
+    }
 
     fun hasActiveSubscription(): Boolean =
         _currentUser.value?.hasActiveSubscription() == true
@@ -401,5 +449,154 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun getFavoriteCount(): Int {
         if (currentUserId == -1L) return 0
         return vpnConfigDao.getFavoriteCount(currentUserId)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // КОНТРОЛЬ ТРАФИКА
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Следит за состоянием подключения: при CONNECTED запускает мониторинг трафика,
+     * при DISCONNECTED — сохраняет использованный трафик в БД.
+     */
+    private fun observeConnectionForTraffic() {
+        viewModelScope.launch {
+            _connectionState.collectLatest { state ->
+                when (state) {
+                    VpnConnectionState.CONNECTED -> {
+                        sessionStartBytes = _byteCountIn.value + _byteCountOut.value
+                        startTrafficMonitor()
+                    }
+                    VpnConnectionState.DISCONNECTED,
+                    VpnConnectionState.ERROR -> {
+                        stopTrafficMonitor()
+                        saveSessionTraffic()
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+
+    private fun startTrafficMonitor() {
+        trafficMonitorJob?.cancel()
+        trafficMonitorJob = viewModelScope.launch {
+            while (true) {
+                delay(5_000) // проверяем каждые 5 секунд
+                checkTrafficLimit()
+                checkSubscriptionExpiry()
+            }
+        }
+    }
+
+    private fun stopTrafficMonitor() {
+        trafficMonitorJob?.cancel()
+        trafficMonitorJob = null
+    }
+
+    private suspend fun saveSessionTraffic() {
+        if (currentUserId == -1L) return
+        val currentBytes = _byteCountIn.value + _byteCountOut.value
+        val sessionBytes = (currentBytes - sessionStartBytes).coerceAtLeast(0L)
+        if (sessionBytes <= 0L) return
+
+        userDao.addUsedTraffic(currentUserId, sessionBytes)
+
+        // Читаем обновлённую запись из БД и обновляем currentUser
+        val updated = userDao.getUserById(currentUserId)
+        if (updated != null) {
+            _currentUser.value = updated
+            sessionManager.updateCurrentUser(updated)
+        }
+    }
+
+    private fun checkTrafficLimit() {
+        val user = _currentUser.value ?: return
+        val tariff = Tariff.fromId(user.tariff)
+        val limit = tariff.trafficLimitBytes ?: return // безлимит — не проверяем
+
+        val ratio = user.trafficUsageRatio() ?: return
+
+        // 80% — предупреждение
+        if (ratio >= 0.8f && !notified80Percent) {
+            notified80Percent = true
+            val remaining = Tariff.formatUsed(user.remainingTrafficBytes() ?: 0L)
+            sendNotification(
+                id = NOTIF_ID_TRAFFIC_80,
+                title = getApplication<Application>().getString(R.string.notif_traffic_80_title),
+                text = getApplication<Application>().getString(
+                    R.string.notif_traffic_80_text, remaining
+                )
+            )
+        }
+
+        // 100% — трафик исчерпан, отключаем VPN
+        if (user.isTrafficExhausted() && !notified100Percent) {
+            notified100Percent = true
+            sendNotification(
+                id = NOTIF_ID_TRAFFIC_100,
+                title = getApplication<Application>().getString(R.string.notif_traffic_exhausted_title),
+                text = getApplication<Application>().getString(R.string.notif_traffic_exhausted_text)
+            )
+            _trafficExhausted.value = true
+            disconnectActive()
+        }
+    }
+
+    private fun checkSubscriptionExpiry() {
+        val user = _currentUser.value ?: return
+        if (notifiedExpiry) return
+        if (user.tariff == "Unlimited") return
+
+        if (user.subscriptionExpiresWithin(SUBSCRIPTION_WARN_MS)) {
+            notifiedExpiry = true
+            val app = getApplication<Application>()
+            sendNotification(
+                id = NOTIF_ID_EXPIRY,
+                title = app.getString(R.string.notif_expiry_title),
+                text = app.getString(R.string.notif_expiry_text)
+            )
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIF_CHANNEL_ID,
+                getApplication<Application>().getString(R.string.notif_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT
+            ).apply {
+                description = getApplication<Application>()
+                    .getString(R.string.notif_channel_desc)
+            }
+            val manager = getApplication<Application>()
+                .getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun sendNotification(id: Int, title: String, text: String) {
+        val app = getApplication<Application>()
+        try {
+            val notification = NotificationCompat.Builder(app, NOTIF_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_vpn_lock)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .build()
+            NotificationManagerCompat.from(app).notify(id, notification)
+        } catch (e: SecurityException) {
+            // Разрешение POST_NOTIFICATIONS не выдано — молча игнорируем
+        }
+    }
+
+    /** Сбрасывает флаги уведомлений (вызывать при смене тарифа) */
+    fun resetTrafficNotifications() {
+        notified80Percent = false
+        notified100Percent = false
+        notifiedExpiry = false
+        _trafficExhausted.value = false
     }
 }
