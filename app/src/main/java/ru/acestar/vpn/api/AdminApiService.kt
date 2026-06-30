@@ -395,6 +395,29 @@ class AdminApiService(private val sessionManager: SessionManager) {
             } catch (e: Exception) { Result.failure(e) }
         }
 
+    /**
+     * Продление подписки на N дней + опционально смена тарифа.
+     * POST /api/admin/users/<id>/subscription/extend
+     */
+    suspend fun extendSubscription(userId: Int, days: Int, tariff: String? = null): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("days", days)
+                    tariff?.let { put("tariff", it) }
+                }
+                val body = encryptedBody(payload).toRequestBody(jsonMediaType)
+                val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/subscription/extend")
+                    .post(body).build()
+
+                client.newCall(request).execute().use { response ->
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    if (json.optBoolean("success", false)) Result.success(true)
+                    else Result.failure(Exception(json.optString("error", "Extend failed")))
+                }
+            } catch (e: Exception) { Result.failure(e) }
+        }
+
     // ─────────────────────────────────────────────────────────────────────────
     // TRAFFIC MANAGEMENT  (зашифрованный payload)
     // POST /api/admin/users/<id>/traffic

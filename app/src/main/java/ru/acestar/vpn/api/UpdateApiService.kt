@@ -27,8 +27,8 @@ class UpdateApiService {
 
     companion object {
         // TODO: замените на ваш репозиторий
-        private const val GITHUB_OWNER = "YOUR_GITHUB_OWNER"
-        private const val GITHUB_REPO  = "YOUR_GITHUB_REPO"
+        private const val GITHUB_OWNER = "murtmarsel"
+        private const val GITHUB_REPO  = "WorldWay"
         private const val TAG = "UpdateApiService"
     }
 

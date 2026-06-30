@@ -103,10 +103,9 @@ class ConfigSelectionActivity : AppCompatActivity() {
     }
 
     /**
-     * Синхронизация конфигов с сервером:
-     * 1. Скачивает полный список серверных конфигов аккаунта
-     * 2. Отправляет на сервер локальные конфиги, которых там нет
-     * Анимация SwipeRefresh крутится пока идёт процесс.
+     * Синхронизация пользовательских конфигов с сервером.
+     * ВАЖНО: серверные конфиги (для кнопок Авто) НЕ скачиваем — они пересоздаются
+     * каждый раз. Только отправляем локальные manual-конфиги, которых нет на сервере.
      */
     private fun syncConfigsWithServer() {
         binding.swipeRefreshConfigs.isRefreshing = true
@@ -117,12 +116,9 @@ class ConfigSelectionActivity : AppCompatActivity() {
                     binding.swipeRefreshConfigs.isRefreshing = false
                     return@launch
                 }
-                val token = sessionManager.getAccessToken()
 
-                // 1. Получаем серверные конфиги (для отображения актуального списка)
-                authApiService.getClientFilesList(user.email, token)
-
-                // 2. Отправляем локальные manual-конфиги на сервер
+                // Отправляем только пользовательские (manual) конфиги на сервер.
+                // Серверные конфиги для Авто-режима НЕ трогаем.
                 val snapshot = configDao.getAllByUser(currentUserId)
                 snapshot.filter { it.source == "manual" }.forEach { cfg ->
                     // При ошибке отправки — игнорируем, ничего не делаем

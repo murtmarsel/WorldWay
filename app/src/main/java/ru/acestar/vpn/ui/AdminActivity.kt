@@ -68,7 +68,7 @@ class AdminActivity : AppCompatActivity() {
                 AdminStatsFragment.newInstance(user.id)
                     .show(supportFragmentManager, "stats_${user.id}")
             },
-            onEditClick    = { user -> showEditUserDialog(user) },
+            onEditClick    = { user -> openEditUser(user) },
             onLogsClick    = { user ->
                 AdminLogsFragment.newInstance(user.id)
                     .show(supportFragmentManager, "logs_${user.id}")
@@ -318,125 +318,29 @@ class AdminActivity : AppCompatActivity() {
             AdminLogsFragment.newInstance(user.id)
                 .show(supportFragmentManager, "logs_${user.id}")
         }
-        b.btnEditUser.setOnClickListener { dialog.dismiss(); showEditUserDialog(user) }
+        b.btnEditUser.setOnClickListener { dialog.dismiss(); openEditUser(user) }
         b.btnResetPassword.setOnClickListener { dialog.dismiss(); showResetPasswordDialog(user) }
-        b.btnManageSubscription.setOnClickListener { dialog.dismiss(); showManageSubscriptionDialog(user) }
+        b.btnManageSubscription.setOnClickListener { dialog.dismiss(); openManageSubscription(user) }
         b.btnDeleteUser.setOnClickListener { dialog.dismiss(); confirmDeleteUser(user) }
 
         dialog.show()
     }
 
-    // ─── Редактирование пользователя ──────────────────────────────────────────
-
-    private fun showEditUserDialog(user: UserAdminData) {
-        val b = DialogEditUserBinding.inflate(layoutInflater)
-
-        b.etEditEmail.setText(user.email)
-        b.cbEmailConfirmed.isChecked = user.email_confirmed
-        b.cbIsActive.isChecked = user.is_active
-
-        // Спиннер тарифов — актуальный список
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, tariffNames)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        b.spinnerTariff.adapter = adapter
-        val idx = tariffIds.indexOfFirst { it.equals(user.tariff, ignoreCase = true) }
-        if (idx >= 0) b.spinnerTariff.setSelection(idx)
-
-        // Прогресс-бар трафика
-        val limit = user.traffic_limit
-        val used = user.used_traffic
-        val progress = ((used.toFloat() / limit) * 100).toInt().coerceIn(0, 100)
-        if (limit > 0L) {
-            b.progressEditTraffic.progress = progress
-            b.tvTrafficUsedLabel.text = "Использовано: ${Tariff.formatUsed(used)}"
-            b.tvTrafficLimitLabel.text = "Лимит: ${Tariff.formatTrafficLimit(limit)}"
-        } else {
-            b.progressEditTraffic.progress = 0
-            b.tvTrafficUsedLabel.text = "Использовано: ${Tariff.formatUsed(used)}"
-            b.tvTrafficLimitLabel.text = "Лимит: безлимит"
-        }
-
-        // Кнопки трафика
-        b.btnAddTraffic.setOnClickListener {
-            showTrafficDeltaDialog(user.id, positive = true)
-        }
-        b.btnSubTraffic.setOnClickListener {
-            showTrafficDeltaDialog(user.id, positive = false)
-        }
-        b.btnResetTraffic.setOnClickListener {
-            MaterialAlertDialogBuilder(this)
-                .setTitle("Сбросить трафик")
-                .setMessage("Обнулить использованный трафик для ${user.email}?")
-                .setPositiveButton("Сбросить") { _, _ ->
-                    viewModel.updateTraffic(user.id, 0L, reset = true)
-                }
-                .setNegativeButton("Отмена", null).show()
-        }
-
-        val dialog = MaterialAlertDialogBuilder(this)
-            .setTitle("Редактирование: ${user.email}")
-            .setView(b.root)
-            .setPositiveButton("Сохранить", null)
-            .setNegativeButton("Отмена", null)
-            .create()
-
-        dialog.setOnShowListener {
-            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
-                .setOnClickListener {
-                    val newEmail = b.etEditEmail.text.toString().trim()
-                    val newTariff = tariffIds[b.spinnerTariff.selectedItemPosition]
-                    viewModel.updateUser(
-                        userId = user.id,
-                        email = newEmail.takeIf { it != user.email && it.isNotBlank() },
-                        tariff = newTariff.takeIf { it != user.tariff },
-                        emailConfirmed = b.cbEmailConfirmed.isChecked
-                            .takeIf { it != user.email_confirmed },
-                        isActive = b.cbIsActive.isChecked
-                            .takeIf { it != user.is_active }
-                    )
-                    dialog.dismiss()
-                }
-        }
-        // После обновления трафика — перезагружаем данные пользователя
-        viewModel.operationState.observe(this) { state ->
-            if (state is AdminViewModel.OperationState.Success && dialog.isShowing) {
-                val updatedUser = viewModel.selectedUser.value ?: return@observe
-                // Обновляем прогресс-бар в диалоге
-                val newLimit = updatedUser.traffic_limit
-                val newUsed  = updatedUser.used_traffic
-                if (newLimit > 0L) {
-                    val progress = ((newUsed.toFloat() / newLimit) * 100).toInt().coerceIn(0, 100)
-                    b.progressEditTraffic.progress = progress
-                    b.tvTrafficUsedLabel.text = "Использовано: ${Tariff.formatUsed(newUsed)}"
-                    b.tvTrafficLimitLabel.text = "Лимит: ${Tariff.formatTrafficLimit(newLimit)}"
-                }
-            }
-        }
-        dialog.show()
+    /** Открывает редактирование пользователя как BottomSheet снизу */
+    private fun openEditUser(user: UserAdminData) {
+        viewModel.selectUser(user)
+        AdminEditUserFragment.newInstance(user.id)
+            .show(supportFragmentManager, "edit_${user.id}")
     }
 
-    private fun showTrafficDeltaDialog(userId: Int, positive: Boolean) {
-        val title = if (positive) "Добавить трафик (ГБ)" else "Убавить трафик (ГБ)"
-        val input = com.google.android.material.textfield.TextInputEditText(this).apply {
-            hint = "Количество ГБ"
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
-                        android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-        }
-        MaterialAlertDialogBuilder(this)
-            .setTitle(title)
-            .setView(input)
-            .setPositiveButton("Применить") { _, _ ->
-                val gb = input.text.toString().toDoubleOrNull()
-                if (gb != null && gb > 0) {
-                    val bytes = (gb * 1024 * 1024 * 1024).toLong()
-                    val delta = if (positive) bytes else -bytes
-                    viewModel.updateTraffic(userId, delta)
-                } else {
-                    showError("Введите корректное число")
-                }
-            }
-            .setNegativeButton("Отмена", null).show()
+    /** Открывает управление подпиской как BottomSheet снизу */
+    private fun openManageSubscription(user: UserAdminData) {
+        viewModel.selectUser(user)
+        AdminSubscriptionFragment.newInstance(user.id)
+            .show(supportFragmentManager, "sub_${user.id}")
     }
+
+    // ─── Редактирование пользователя — вынесено в AdminEditUserFragment ────────
 
     // ─── Сброс пароля ─────────────────────────────────────────────────────────
 
@@ -475,36 +379,7 @@ class AdminActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    // ─── Управление подпиской ─────────────────────────────────────────────────
-
-    private fun showManageSubscriptionDialog(user: UserAdminData) {
-        val options = arrayOf(
-            "Приостановить (isActive → 0)",
-            "Возобновить (isActive → 1)",
-            "Отменить (тариф → Trial)"
-        )
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Управление подпиской\n${user.email}")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> confirmSubscriptionAction(user, "pause",
-                        "Приостановить подписку для ${user.email}?")
-                    1 -> confirmSubscriptionAction(user, "resume",
-                        "Возобновить подписку для ${user.email}?")
-                    2 -> confirmSubscriptionAction(user, "cancel",
-                        "Отменить подписку? Тариф будет изменён на Trial.")
-                }
-            }
-            .show()
-    }
-
-    private fun confirmSubscriptionAction(user: UserAdminData, action: String, message: String) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Подтверждение")
-            .setMessage(message)
-            .setPositiveButton("Да") { _, _ -> viewModel.updateSubscription(user.id, action) }
-            .setNegativeButton("Отмена", null).show()
-    }
+    // ─── Управление подпиской — вынесено в AdminSubscriptionFragment ───────────
 
     // ─── Удаление пользователя ────────────────────────────────────────────────
 

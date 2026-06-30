@@ -111,12 +111,28 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         _usersState.value = UsersState.Loading
         viewModelScope.launch {
             apiService.getUsers()
-                .onSuccess { _usersState.value = UsersState.Success(it) }
+                .onSuccess { users ->
+                    _usersState.value = UsersState.Success(users)
+                    // Обновляем выбранного пользователя свежими данными
+                    _selectedUser.value?.let { sel ->
+                        users.firstOrNull { it.id == sel.id }?.let { _selectedUser.value = it }
+                    }
+                }
                 .onFailure { _usersState.value = UsersState.Error(it.message ?: "Failed to load users") }
         }
     }
 
     fun selectUser(user: UserAdminData) { _selectedUser.value = user }
+
+    /** Тихая перезагрузка одного пользователя (для автообновления окон) */
+    fun silentRefreshSelectedUser(userId: Int) {
+        viewModelScope.launch {
+            apiService.getUsers().onSuccess { users ->
+                _usersState.value = UsersState.Success(users)
+                users.firstOrNull { it.id == userId }?.let { _selectedUser.value = it }
+            }
+        }
+    }
 
     // ─── Configs ──────────────────────────────────────────────────────────────
 
@@ -286,6 +302,23 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
                 .onFailure { _operationState.value = OperationState.Error(it.message ?: "Failed") }
         }
     }
+
+    // ─── Extend subscription ──────────────────────────────────────────────────
+
+    fun extendSubscription(userId: Int, days: Int, tariff: String? = null) {
+        _operationState.value = OperationState.Loading
+        viewModelScope.launch {
+            apiService.extendSubscription(userId, days, tariff)
+                .onSuccess {
+                    _operationState.value = OperationState.Success("Подписка продлена на $days дн.")
+                    loadUsers()
+                }
+                .onFailure { _operationState.value = OperationState.Error(it.message ?: "Failed") }
+        }
+    }
+
+    /** Загрузка платежей с возвратом результата для окна управления подпиской */
+    fun loadPaymentsForSubscription(userId: Int) = loadUserPayments(userId)
 
     // ─── Misc ─────────────────────────────────────────────────────────────────
 

@@ -229,6 +229,22 @@
     <string name="payments_col_amount">Сумма</string>
     <string name="payments_col_status">Статус</string>
 
+    <!-- Subscription management (admin) -->
+    <string name="sub_status_label">Статус</string>
+    <string name="sub_extend_label">Продление подписки</string>
+    <string name="sub_extend_30">+30 дн</string>
+    <string name="sub_extend_90">+90 дн</string>
+    <string name="sub_extend_365">+1 год</string>
+    <string name="sub_extend_custom">Другой срок…</string>
+    <string name="sub_control_label">Управление статусом</string>
+    <string name="sub_pause">Пауза</string>
+    <string name="sub_resume">Возобновить</string>
+    <string name="sub_cancel">Отменить</string>
+    <string name="sub_custom_days_hint">Количество дней</string>
+    <string name="sub_active">Активна</string>
+    <string name="sub_inactive">Приостановлена</string>
+    <string name="sub_expired">Истекла</string>
+
     <!-- App update -->
     <string name="update_channel_name">Обновления приложения</string>
     <string name="update_channel_desc">Уведомления о доступных обновлениях</string>
