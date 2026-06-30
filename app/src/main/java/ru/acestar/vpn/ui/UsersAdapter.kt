@@ -1,3 +1,5 @@
+package ru.acestar.vpn.ui
+
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -7,9 +9,12 @@ import androidx.recyclerview.widget.RecyclerView
 import ru.acestar.vpn.R
 import ru.acestar.vpn.data.model.admin.UserAdminData
 
-// UsersAdapter.kt
 class UsersAdapter(
-    private val onItemClick: (UserAdminData) -> Unit
+    private val onItemClick:   (UserAdminData) -> Unit,
+    private val onConfigsClick: ((UserAdminData) -> Unit)? = null,
+    private val onStatsClick:   ((UserAdminData) -> Unit)? = null,
+    private val onEditClick:    ((UserAdminData) -> Unit)? = null,
+    private val onLogsClick:    ((UserAdminData) -> Unit)? = null
 ) : RecyclerView.Adapter<UsersAdapter.ViewHolder>() {
 
     private var originalUsers = listOf<UserAdminData>()
@@ -22,23 +27,17 @@ class UsersAdapter(
     }
 
     fun filter(query: String) {
-        filteredUsers = if (query.isEmpty()) {
-            originalUsers
-        } else {
-            originalUsers.filter {
-                it.email.contains(query, ignoreCase = true) ||
-                        it.id.toString().contains(query)
-            }
+        filteredUsers = if (query.isEmpty()) originalUsers
+        else originalUsers.filter {
+            it.email.contains(query, ignoreCase = true) ||
+            it.id.toString().contains(query)
         }
         notifyDataSetChanged()
     }
 
     fun filterByTariff(tariff: String?) {
-        filteredUsers = if (tariff == null) {
-            originalUsers
-        } else {
-            originalUsers.filter { it.tariff == tariff }
-        }
+        filteredUsers = if (tariff == null) originalUsers
+        else originalUsers.filter { it.tariff == tariff }
         notifyDataSetChanged()
     }
 
@@ -49,45 +48,49 @@ class UsersAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        holder.bind(filteredUsers[position])
-        holder.itemView.setOnClickListener { onItemClick(filteredUsers[position]) }
+        val user = filteredUsers[position]
+        holder.bind(user)
 
-        // Кнопки быстрого управления
+        // Клик на всю карточку — открывает полный диалог деталей
+        holder.itemView.setOnClickListener { onItemClick(user) }
+
+        // Кнопки быстрого доступа — каждая открывает свой диалог напрямую
         holder.btnViewConfigs.setOnClickListener {
-            onItemClick(filteredUsers[position])
-            // Можно вызвать конкретное действие
+            onConfigsClick?.invoke(user) ?: onItemClick(user)
         }
         holder.btnStats.setOnClickListener {
-            // Показать статистику
+            onStatsClick?.invoke(user) ?: onItemClick(user)
         }
         holder.btnEdit.setOnClickListener {
-            // Редактировать
+            onEditClick?.invoke(user) ?: onItemClick(user)
         }
         holder.btnLogs.setOnClickListener {
-            // Показать логи
+            onLogsClick?.invoke(user) ?: onItemClick(user)
         }
     }
 
     override fun getItemCount() = filteredUsers.size
 
     class ViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
-        private val tvUserId: TextView = itemView.findViewById(R.id.tvUserId)
-        private val tvUserEmail: TextView = itemView.findViewById(R.id.tvUserEmail)
-        private val tvUserTariff: TextView = itemView.findViewById(R.id.tvUserTariff)
-        private val tvUserStatus: TextView = itemView.findViewById(R.id.tvUserStatus)
+        private val tvUserId:     TextView  = itemView.findViewById(R.id.tvUserId)
+        private val tvUserEmail:  TextView  = itemView.findViewById(R.id.tvUserEmail)
+        private val tvUserTariff: TextView  = itemView.findViewById(R.id.tvUserTariff)
+        private val tvUserStatus: TextView  = itemView.findViewById(R.id.tvUserStatus)
         val btnViewConfigs: ImageView = itemView.findViewById(R.id.btnViewConfigs)
-        val btnStats: ImageView = itemView.findViewById(R.id.btnStats)
-        val btnEdit: ImageView = itemView.findViewById(R.id.btnEdit)
-        val btnLogs: ImageView = itemView.findViewById(R.id.btnLogs)
+        val btnStats:       ImageView = itemView.findViewById(R.id.btnStats)
+        val btnEdit:        ImageView = itemView.findViewById(R.id.btnEdit)
+        val btnLogs:        ImageView = itemView.findViewById(R.id.btnLogs)
 
         fun bind(user: UserAdminData) {
-            tvUserId.text = "ID: ${user.id}"
-            tvUserEmail.text = user.email
+            tvUserId.text     = "ID: ${user.id}"
+            tvUserEmail.text  = user.email
             tvUserTariff.text = "Тариф: ${user.tariff}"
-            tvUserStatus.text = if (user.is_active) "Активен" else "Заблокирован"
+            tvUserStatus.text = if (user.is_active) "● Активен" else "● Заблокирован"
             tvUserStatus.setTextColor(
-                if (user.is_active) itemView.context.getColor(android.R.color.holo_green_dark)
-                else itemView.context.getColor(android.R.color.holo_red_dark)
+                if (user.is_active)
+                    itemView.context.getColor(android.R.color.holo_green_dark)
+                else
+                    itemView.context.getColor(android.R.color.holo_red_dark)
             )
         }
     }

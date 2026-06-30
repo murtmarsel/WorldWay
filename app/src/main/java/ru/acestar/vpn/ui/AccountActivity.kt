@@ -1,20 +1,29 @@
 package ru.acestar.vpn.ui
 
+import android.animation.ObjectAnimator
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.view.animation.LinearInterpolator
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ru.acestar.vpn.R
 import ru.acestar.vpn.VpnApplication
+import ru.acestar.vpn.api.AuthApiService
 import ru.acestar.vpn.data.model.Tariff
 import ru.acestar.vpn.data.model.User
 import ru.acestar.vpn.data.repository.SessionManager
-import ru.acestar.vpn.data.repository.StatsRepository
 import ru.acestar.vpn.data.repository.UserRepository
 import ru.acestar.vpn.databinding.ActivityAccountBinding
+import ru.acestar.vpn.ui.adapters.PaymentRowAdapter
+import ru.acestar.vpn.api.PaymentApiService
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -26,8 +35,14 @@ class AccountActivity : AppCompatActivity() {
     private val userRepository by lazy {
         UserRepository((application as VpnApplication).database.userDao())
     }
-    private val statsRepository by lazy {
-        StatsRepository((application as VpnApplication).database.connectionStatsDao())
+    private val authApiService by lazy { AuthApiService(sessionManager) }
+    private val paymentApiService by lazy { PaymentApiService(sessionManager) }
+
+    private var autoRefreshJob: Job? = null
+    private var refreshAnimator: ObjectAnimator? = null
+
+    companion object {
+        private const val AUTO_REFRESH_INTERVAL_MS = 10 * 60 * 1000L // 10 минут
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -39,26 +54,82 @@ class AccountActivity : AppCompatActivity() {
         setSupportActionBar(binding.toolbar)
         binding.toolbar.setNavigationOnClickListener { finish() }
 
+        // Скрываем блок статистики (реализован, но скрыт по требованию)
+        binding.cardStats.visibility = View.GONE
+
         binding.btnExtendSubscription.setOnClickListener {
             startActivity(Intent(this, SubscriptionActivity::class.java))
         }
         binding.btnLogout.setOnClickListener { confirmLogout() }
+
+        // Иконка обновления с анимацией
+        setupRefreshIcon()
+        binding.ivRefreshAccount.setOnClickListener { loadAndRefresh() }
     }
 
     override fun onResume() {
         super.onResume()
-        // Каждый раз при открытии/возврате — читаем свежие данные из БД
-        loadUserData()
+        loadAndRefresh()
+        startAutoRefresh()
     }
 
-    private fun loadUserData() {
+    override fun onPause() {
+        super.onPause()
+        autoRefreshJob?.cancel()
+        refreshAnimator?.cancel()
+    }
+
+    private fun setupRefreshIcon() {
+        refreshAnimator = ObjectAnimator.ofFloat(binding.ivRefreshAccount, "rotation", 0f, 360f).apply {
+            duration = 700
+            interpolator = LinearInterpolator()
+            repeatCount = 0
+        }
+    }
+
+    private fun spinRefreshIcon() {
+        refreshAnimator?.cancel()
+        binding.ivRefreshAccount.rotation = 0f
+        refreshAnimator = ObjectAnimator.ofFloat(binding.ivRefreshAccount, "rotation", 0f, 360f).apply {
+            duration = 700
+            interpolator = LinearInterpolator()
+            repeatCount = 0
+            start()
+        }
+    }
+
+    /** Загружает локально сразу, потом получает с сервера */
+    private fun loadAndRefresh() {
         lifecycleScope.launch {
-            // Сессия даёт нам userId и базовые поля
+            // 1. Сразу показываем локальные данные
             val session = sessionManager.getCurrentUser() ?: return@launch
-            // Читаем полную запись из БД — там актуальный usedTrafficBytes
-            val user = userRepository.getUserById(session.id) ?: session
-            bindUser(user)
-            loadStats(user.id)
+            val localUser = userRepository.getUserById(session.id) ?: session
+            bindUser(localUser)
+
+            // 2. Получаем актуальные данные с сервера в фоне
+            try {
+                authApiService.refreshOnResume(userRepository)
+                val updated = userRepository.getUserById(session.id)
+                if (updated != null) {
+                    bindUser(updated)
+                    spinRefreshIcon()
+                }
+            } catch (e: Exception) {
+                // Нет сети — показываем локальные данные
+            }
+
+            // 3. Загружаем историю платежей
+            loadPayments()
+        }
+    }
+
+    private fun startAutoRefresh() {
+        autoRefreshJob?.cancel()
+        autoRefreshJob = lifecycleScope.launch {
+            while (isActive) {
+                delay(AUTO_REFRESH_INTERVAL_MS)
+                if (isActive) loadAndRefresh()
+            }
         }
     }
 
@@ -66,16 +137,14 @@ class AccountActivity : AppCompatActivity() {
         val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
         val tariff = Tariff.fromId(user.tariff)
 
-        // Аватар — первая буква email
-        binding.tvAvatarLetter.text =
-            user.email.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+        // Аватар
+        binding.tvAvatarLetter.text = user.email.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
 
-        // Email (без username, без переноса — авто-масштаб через autoSizeTextType)
+        // Email
         binding.tvEmail.text = user.email
 
         // Подтверждение email
-        binding.ivEmailConfirmed.visibility =
-            if (user.emailConfirmed) View.VISIBLE else View.GONE
+        binding.ivEmailConfirmed.visibility = if (user.emailConfirmed) View.VISIBLE else View.GONE
 
         // Дата регистрации
         binding.tvRegisteredDate.text = dateFormat.format(Date(user.createdAt))
@@ -89,23 +158,25 @@ class AccountActivity : AppCompatActivity() {
             if (isActive) getString(R.string.account_active) else getString(R.string.account_expired)
         binding.tvTariffBadge.backgroundTintList =
             android.content.res.ColorStateList.valueOf(
-                androidx.core.content.ContextCompat.getColor(
-                    this, if (isActive) R.color.connected else R.color.error
-                )
+                ContextCompat.getColor(this, if (isActive) R.color.connected else R.color.error)
             )
 
         // Срок действия
         binding.tvValidUntil.text = when {
             tariff == Tariff.UNLIMITED -> getString(R.string.subscription_active_unlimited)
-            tariff == Tariff.HOUR      -> getString(R.string.account_by_traffic)
+            tariff == Tariff.HOUR ->
+                if (user.subsEndDate != null && user.subsEndDate > 0)
+                    dateFormat.format(Date(user.subsEndDate)) + " (1 ч)"
+                else getString(R.string.account_expired)
             user.subsEndDate != null && user.subsEndDate > 0 ->
                 dateFormat.format(Date(user.subsEndDate))
             else -> getString(R.string.account_expired)
         }
 
-        // Трафик
-        val limit = tariff.trafficLimitBytes
+        // Трафик — используем effectiveTrafficLimit() который учитывает серверный лимит
+        val limit = user.effectiveTrafficLimit()
         if (limit == null) {
+            // Безлимит — просто название тарифа без "безлимитно"
             binding.layoutTrafficLimit.visibility = View.GONE
             binding.layoutUnlimitedTraffic.visibility = View.VISIBLE
         } else {
@@ -120,13 +191,11 @@ class AccountActivity : AppCompatActivity() {
             binding.progressTraffic.progress = progress
             binding.progressTraffic.progressTintList =
                 android.content.res.ColorStateList.valueOf(
-                    androidx.core.content.ContextCompat.getColor(
-                        this, when {
-                            progress >= 90 -> R.color.error
-                            progress >= 70 -> R.color.connecting
-                            else           -> R.color.primary
-                        }
-                    )
+                    ContextCompat.getColor(this, when {
+                        progress >= 90 -> R.color.error
+                        progress >= 70 -> R.color.connecting
+                        else           -> R.color.primary
+                    })
                 )
 
             val remaining = user.remainingTrafficBytes() ?: 0L
@@ -134,17 +203,42 @@ class AccountActivity : AppCompatActivity() {
                 getString(R.string.account_traffic_remaining_fmt, Tariff.formatUsed(remaining))
         }
 
-        // Кнопка продления — скрываем для Unlimited
         binding.btnExtendSubscription.visibility =
             if (tariff == Tariff.UNLIMITED) View.GONE else View.VISIBLE
     }
 
-    private suspend fun loadStats(userId: Long) {
-        val (received, sent) = statsRepository.getTotalUsage(userId)
-        val sessions = statsRepository.getRecentStats(userId).size
-        binding.tvTotalReceived.text = Tariff.formatUsed(received)
-        binding.tvTotalSent.text     = Tariff.formatUsed(sent)
-        binding.tvTotalSessions.text = sessions.toString()
+    private fun loadPayments() {
+        lifecycleScope.launch {
+            try {
+                val result = paymentApiService.getPaymentHistory()
+                result.onSuccess { payments ->
+                    val adapter = PaymentRowAdapter()
+                    binding.rvPaymentsHistory.layoutManager = LinearLayoutManager(this@AccountActivity)
+                    binding.rvPaymentsHistory.adapter = adapter
+
+                    if (payments.isEmpty()) {
+                        binding.layoutPaymentsHeader.visibility = View.GONE
+                        binding.rvPaymentsHistory.visibility = View.GONE
+                        binding.tvPaymentsEmpty.visibility = View.VISIBLE
+                    } else {
+                        binding.layoutPaymentsHeader.visibility = View.VISIBLE
+                        binding.rvPaymentsHistory.visibility = View.VISIBLE
+                        binding.tvPaymentsEmpty.visibility = View.GONE
+                        // Последние 10 платежей
+                        adapter.submitList(payments.take(10))
+                    }
+                }.onFailure {
+                    // Нет данных с сервера — показываем заглушку, карточку не прячем
+                    binding.layoutPaymentsHeader.visibility = View.GONE
+                    binding.rvPaymentsHistory.visibility = View.GONE
+                    binding.tvPaymentsEmpty.visibility = View.VISIBLE
+                }
+            } catch (e: Exception) {
+                binding.layoutPaymentsHeader.visibility = View.GONE
+                binding.rvPaymentsHistory.visibility = View.GONE
+                binding.tvPaymentsEmpty.visibility = View.VISIBLE
+            }
+        }
     }
 
     private fun confirmLogout() {

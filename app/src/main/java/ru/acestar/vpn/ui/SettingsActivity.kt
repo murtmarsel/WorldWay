@@ -101,6 +101,12 @@ class SettingsActivity : AppCompatActivity() {
             startActivity(intent)
         }
 
+        // Автообновление
+        binding.switchAutoUpdate.isChecked = VpnSettingsPreferences.isAutoUpdateEnabled(this)
+        binding.switchAutoUpdate.setOnCheckedChangeListener { _, isChecked ->
+            VpnSettingsPreferences.setAutoUpdateEnabled(this, isChecked)
+        }
+
         // Юридические ссылки
         binding.tvPrivacyPolicyFooter.setOnClickListener {
             startActivity(LegalDocumentActivity.privacyIntent(this))

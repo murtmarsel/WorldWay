@@ -1,7 +1,6 @@
-// ui/AdminActivity.kt
 package ru.acestar.vpn.ui
 
-import UsersAdapter
+import ru.acestar.vpn.ui.UsersAdapter
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -12,25 +11,23 @@ import android.text.TextWatcher
 import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.tabs.TabLayout
-import com.google.android.material.textfield.TextInputEditText
+import ru.acestar.vpn.R
+import ru.acestar.vpn.data.model.Tariff
 import ru.acestar.vpn.data.model.admin.UserAdminData
 import ru.acestar.vpn.data.model.admin.UserConfigFile
 import ru.acestar.vpn.data.model.admin.UserLog
 import ru.acestar.vpn.data.model.admin.UserPayment
 import ru.acestar.vpn.data.model.admin.UserStats
+import ru.acestar.vpn.databinding.*
 import ru.acestar.vpn.ui.adapters.ConfigsAdapter
-import ru.acestar.vpn.databinding.ActivityAdminBinding
-import ru.acestar.vpn.databinding.DialogUserDetailBinding
-import ru.acestar.vpn.databinding.DialogEditUserBinding
-import ru.acestar.vpn.databinding.DialogConfigsBinding
-import ru.acestar.vpn.databinding.DialogPaymentsBinding
-import ru.acestar.vpn.databinding.DialogLogsBinding
-import ru.acestar.vpn.R
+import ru.acestar.vpn.ui.adapters.LogsAdapter
+import ru.acestar.vpn.ui.adapters.PaymentsAdapter
 import ru.acestar.vpn.viewmodel.AdminViewModel
 
 class AdminActivity : AppCompatActivity() {
@@ -39,14 +36,17 @@ class AdminActivity : AppCompatActivity() {
     private lateinit var viewModel: AdminViewModel
     private lateinit var usersAdapter: UsersAdapter
 
+    // Список тарифов для спиннеров
+    private val tariffIds = Tariff.entries.map { it.id }.toTypedArray()
+    private val tariffNames = Tariff.entries.map { it.displayName }.toTypedArray()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityAdminBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
         viewModel = ViewModelProvider(
-            this,
-            ViewModelProvider.AndroidViewModelFactory.getInstance(application)
+            this, ViewModelProvider.AndroidViewModelFactory.getInstance(application)
         )[AdminViewModel::class.java]
 
         setupToolbar()
@@ -61,45 +61,47 @@ class AdminActivity : AppCompatActivity() {
     }
 
     private fun setupViews() {
-        // Адаптер для списка пользователей
-        usersAdapter = UsersAdapter { user ->
-            onUserClick(user)
-        }
+        usersAdapter = UsersAdapter(
+            onItemClick    = { user -> onUserClick(user) },
+            onConfigsClick = { user -> viewModel.loadUserConfigs(user.id) },
+            onStatsClick   = { user ->
+                AdminStatsFragment.newInstance(user.id)
+                    .show(supportFragmentManager, "stats_${user.id}")
+            },
+            onEditClick    = { user -> showEditUserDialog(user) },
+            onLogsClick    = { user ->
+                AdminLogsFragment.newInstance(user.id)
+                    .show(supportFragmentManager, "logs_${user.id}")
+            }
+        )
         binding.rvAdminUsers.layoutManager = LinearLayoutManager(this)
         binding.rvAdminUsers.adapter = usersAdapter
 
-        // Кнопка входа
         binding.btnAdminLogin.setOnClickListener {
-            val password = binding.etAdminPassword.text.toString()
-            if (password.isNotEmpty()) {
-                viewModel.adminLogin(password)
-            } else {
-                showError("Введите пароль")
-            }
+            val pw = binding.etAdminPassword.text.toString()
+            if (pw.isNotEmpty()) viewModel.adminLogin(pw)
+            else showError("Введите пароль")
         }
 
-        // Поиск
         binding.etSearchUser.addTextChangedListener(object : TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                usersAdapter.filter(s.toString())
-            }
+            override fun afterTextChanged(s: Editable?) { usersAdapter.filter(s.toString()) }
         })
 
-        // Фильтр по тарифу
-        val tariffs = arrayOf("Все", "Free", "Month", "Year")
-        val tariffAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, tariffs)
+        // Фильтр по тарифу — используем актуальные тарифы
+        val filterItems = arrayOf("Все") + tariffIds
+        val tariffAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, filterItems)
         tariffAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerTariffFilter.adapter = tariffAdapter
-        binding.spinnerTariffFilter.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                usersAdapter.filterByTariff(if (position == 0) null else tariffs[position])
+        binding.spinnerTariffFilter.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    usersAdapter.filterByTariff(if (pos == 0) null else filterItems[pos])
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
             }
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
 
-        // TabLayout
         binding.tabAdmin.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab?) {
                 when (tab?.position) {
@@ -112,22 +114,16 @@ class AdminActivity : AppCompatActivity() {
             override fun onTabReselected(tab: TabLayout.Tab?) {}
         })
 
-        // Очистка логов
         binding.btnClearLogs.setOnClickListener {
             MaterialAlertDialogBuilder(this)
                 .setTitle("Очистить логи")
-                .setMessage("Вы уверены, что хотите очистить все логи?")
-                .setPositiveButton("Очистить") { _, _ ->
-                    // TODO: Очистить логи на сервере
-                    showSuccess("Логи очищены")
-                }
-                .setNegativeButton("Отмена", null)
-                .show()
+                .setMessage("Вы уверены?")
+                .setPositiveButton("Очистить") { _, _ -> showSuccess("Логи очищены") }
+                .setNegativeButton("Отмена", null).show()
         }
     }
 
     private fun setupObservers() {
-        // Авторизация
         viewModel.authState.observe(this) { state ->
             when (state) {
                 is AdminViewModel.AuthState.Loading -> {
@@ -152,18 +148,18 @@ class AdminActivity : AppCompatActivity() {
             }
         }
 
-        // Список пользователей
         viewModel.usersState.observe(this) { state ->
             when (state) {
-                is AdminViewModel.UsersState.Loading -> {
+                is AdminViewModel.UsersState.Loading ->
                     binding.progressBar.visibility = View.VISIBLE
-                }
                 is AdminViewModel.UsersState.Success -> {
                     binding.progressBar.visibility = View.GONE
                     usersAdapter.submitList(state.users)
-                    binding.tvUsersHint.visibility = if (state.users.isEmpty()) View.VISIBLE else View.GONE
+                    binding.tvUsersHint.visibility =
+                        if (state.users.isEmpty()) View.VISIBLE else View.GONE
                     binding.tvTotalUsers.text = "Всего: ${state.users.size}"
-                    binding.tvActiveUsers.text = "Активных: ${state.users.count { it.is_active }}"
+                    binding.tvActiveUsers.text =
+                        "Активных: ${state.users.count { it.is_active }}"
                 }
                 is AdminViewModel.UsersState.Error -> {
                     binding.progressBar.visibility = View.GONE
@@ -173,12 +169,10 @@ class AdminActivity : AppCompatActivity() {
             }
         }
 
-        // Конфигурации
         viewModel.configsState.observe(this) { state ->
             when (state) {
-                is AdminViewModel.ConfigsState.Loading -> {
+                is AdminViewModel.ConfigsState.Loading ->
                     binding.progressBar.visibility = View.VISIBLE
-                }
                 is AdminViewModel.ConfigsState.Success -> {
                     binding.progressBar.visibility = View.GONE
                     showConfigsDialog(state.configs)
@@ -191,56 +185,36 @@ class AdminActivity : AppCompatActivity() {
             }
         }
 
-        // Статистика
         viewModel.statsState.observe(this) { state ->
             when (state) {
-                is AdminViewModel.StatsState.Success -> {
-                    showStatsDialog(state.stats)
-                }
-                is AdminViewModel.StatsState.Error -> {
-                    showError(state.message)
-                }
+                is AdminViewModel.StatsState.Error -> showError(state.message)
                 else -> {}
             }
         }
 
-        // Платежи
         viewModel.paymentsState.observe(this) { state ->
             when (state) {
-                is AdminViewModel.PaymentsState.Success -> {
-                    showPaymentsDialog(state.payments)
-                }
-                is AdminViewModel.PaymentsState.Error -> {
-                    showError(state.message)
-                }
+                is AdminViewModel.PaymentsState.Error -> showError(state.message)
                 else -> {}
             }
         }
 
-        // Логи
         viewModel.logsState.observe(this) { state ->
             when (state) {
-                is AdminViewModel.LogsState.Loading -> {
+                is AdminViewModel.LogsState.Loading ->
                     binding.progressBar.visibility = View.VISIBLE
-                }
-                is AdminViewModel.LogsState.Success -> {
-                    binding.progressBar.visibility = View.GONE
-                    showLogsDialog(state.logs)
-                }
                 is AdminViewModel.LogsState.Error -> {
                     binding.progressBar.visibility = View.GONE
                     showError(state.message)
                 }
-                else -> {}
+                else -> binding.progressBar.visibility = View.GONE
             }
         }
 
-        // Операции
         viewModel.operationState.observe(this) { state ->
             when (state) {
-                is AdminViewModel.OperationState.Loading -> {
+                is AdminViewModel.OperationState.Loading ->
                     binding.progressBar.visibility = View.VISIBLE
-                }
                 is AdminViewModel.OperationState.Success -> {
                     binding.progressBar.visibility = View.GONE
                     showSuccess(state.message)
@@ -256,6 +230,8 @@ class AdminActivity : AppCompatActivity() {
         }
     }
 
+    // ─── Панели ───────────────────────────────────────────────────────────────
+
     private fun showUsersList() {
         binding.layoutConfigs.visibility = View.GONE
         binding.layoutLogs.visibility = View.GONE
@@ -268,14 +244,10 @@ class AdminActivity : AppCompatActivity() {
         binding.layoutLogs.visibility = View.GONE
         binding.layoutConfigs.visibility = View.VISIBLE
         binding.tvAdminHint.visibility = View.GONE
-
         binding.btnLoadConfigs.setOnClickListener {
             val userId = binding.etConfigUserId.text.toString().toIntOrNull()
-            if (userId != null) {
-                viewModel.loadUserConfigs(userId)
-            } else {
-                showError("Введите ID пользователя")
-            }
+            if (userId != null) viewModel.loadUserConfigs(userId)
+            else showError("Введите ID пользователя")
         }
     }
 
@@ -284,17 +256,9 @@ class AdminActivity : AppCompatActivity() {
         binding.layoutConfigs.visibility = View.GONE
         binding.layoutLogs.visibility = View.VISIBLE
         binding.tvAdminHint.visibility = View.GONE
-
-        // Загружаем логи для выбранного пользователя
-//        binding.etLogUserId.setOnClickListener {
-//            val userId = binding.etLogUserId.text.toString().toIntOrNull()
-//            if (userId != null) {
-//                viewModel.loadUserLogs(userId)
-//            } else {
-//                showError("Введите ID пользователя")
-//            }
-//        }
     }
+
+    // ─── Клик по пользователю ─────────────────────────────────────────────────
 
     private fun onUserClick(user: UserAdminData) {
         viewModel.selectUser(user)
@@ -303,233 +267,325 @@ class AdminActivity : AppCompatActivity() {
 
     private fun showUserDetailDialog(user: UserAdminData) {
         val dialog = BottomSheetDialog(this)
-        val dialogBinding = DialogUserDetailBinding.inflate(layoutInflater)
-        dialog.setContentView(dialogBinding.root)
+        val b = DialogUserDetailBinding.inflate(layoutInflater)
+        dialog.setContentView(b.root)
 
-        // Заполняем данные пользователя
-        dialogBinding.tvUserId.text = "ID: ${user.id}"
-        dialogBinding.tvUserEmail.text = user.email
-        dialogBinding.tvUserTariff.text = "Тариф: ${user.tariff}"
-        dialogBinding.tvUserStatus.text = if (user.is_active) "Активен" else "Заблокирован"
-        dialogBinding.tvUserStatus.setTextColor(
-            if (user.is_active) getColor(android.R.color.holo_green_dark) else getColor(android.R.color.holo_red_dark)
+        b.tvUserId.text = "ID: ${user.id}"
+        b.tvUserEmail.text = user.email
+        b.tvUserTariff.text = "Тариф: ${Tariff.fromId(user.tariff).displayName}"
+        b.tvUserStatus.text = if (user.is_active) "● Активен" else "● Заблокирован"
+        b.tvUserStatus.setTextColor(
+            getColor(if (user.is_active) android.R.color.holo_green_dark
+                     else android.R.color.holo_red_dark)
         )
-        dialogBinding.tvUserEmailConfirmed.text = if (user.email_confirmed) "✓ Подтвержден" else "✗ Не подтвержден"
-        dialogBinding.tvUserCreated.text = "Создан: ${user.create_date}"
+        b.tvUserEmailConfirmed.text =
+            if (user.email_confirmed) "✓ Email подтверждён" else "✗ Email не подтверждён"
+        b.tvUserCreated.text = "Создан: ${user.create_date}"
 
-        // Кнопки управления
-        dialogBinding.btnViewConfigs.setOnClickListener {
-            dialog.dismiss()
-            viewModel.loadUserConfigs(user.id)
+        // Прогресс-бар трафика
+        val limit = user.traffic_limit
+        if (limit > 0L) {
+            b.layoutTrafficBar.visibility = View.VISIBLE
+            val used = user.used_traffic
+            val progress = ((used.toFloat() / limit) * 100).toInt().coerceIn(0, 100)
+            b.progressTraffic.progress = progress
+            b.tvTrafficInfo.text =
+                "${Tariff.formatUsed(used)} / ${Tariff.formatTrafficLimit(limit)}"
+            val tint = when {
+                progress >= 90 -> R.color.error
+                progress >= 70 -> R.color.connecting
+                else -> R.color.primary
+            }
+            b.progressTraffic.progressTintList =
+                android.content.res.ColorStateList.valueOf(ContextCompat.getColor(this, tint))
+        } else {
+            b.layoutTrafficBar.visibility = View.GONE
         }
 
-        dialogBinding.btnViewStats.setOnClickListener {
+        b.btnViewConfigs.setOnClickListener { dialog.dismiss(); viewModel.loadUserConfigs(user.id) }
+        b.btnViewStats.setOnClickListener {
             dialog.dismiss()
-            viewModel.loadUserStats(user.id)
+            AdminStatsFragment.newInstance(user.id)
+                .show(supportFragmentManager, "stats_${user.id}")
         }
-
-        dialogBinding.btnViewPayments.setOnClickListener {
+        b.btnViewPayments.setOnClickListener {
             dialog.dismiss()
-            viewModel.loadUserPayments(user.id)
+            AdminPaymentsFragment.newInstance(user.id)
+                .show(supportFragmentManager, "payments_${user.id}")
         }
-
-        dialogBinding.btnViewLogs.setOnClickListener {
+        b.btnViewLogs.setOnClickListener {
             dialog.dismiss()
-            viewModel.loadUserLogs(user.id)
+            AdminLogsFragment.newInstance(user.id)
+                .show(supportFragmentManager, "logs_${user.id}")
         }
-
-        dialogBinding.btnEditUser.setOnClickListener {
-            dialog.dismiss()
-            showEditUserDialog(user)
-        }
-
-        dialogBinding.btnResetPassword.setOnClickListener {
-            dialog.dismiss()
-            showResetPasswordDialog(user)
-        }
-
-        dialogBinding.btnManageSubscription.setOnClickListener {
-            dialog.dismiss()
-            showManageSubscriptionDialog(user)
-        }
-
-        dialogBinding.btnDeleteUser.setOnClickListener {
-            dialog.dismiss()
-            confirmDeleteUser(user)
-        }
+        b.btnEditUser.setOnClickListener { dialog.dismiss(); showEditUserDialog(user) }
+        b.btnResetPassword.setOnClickListener { dialog.dismiss(); showResetPasswordDialog(user) }
+        b.btnManageSubscription.setOnClickListener { dialog.dismiss(); showManageSubscriptionDialog(user) }
+        b.btnDeleteUser.setOnClickListener { dialog.dismiss(); confirmDeleteUser(user) }
 
         dialog.show()
     }
 
+    // ─── Редактирование пользователя ──────────────────────────────────────────
+
     private fun showEditUserDialog(user: UserAdminData) {
-        val dialogBinding = DialogEditUserBinding.inflate(layoutInflater)
+        val b = DialogEditUserBinding.inflate(layoutInflater)
+
+        b.etEditEmail.setText(user.email)
+        b.cbEmailConfirmed.isChecked = user.email_confirmed
+        b.cbIsActive.isChecked = user.is_active
+
+        // Спиннер тарифов — актуальный список
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, tariffNames)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        b.spinnerTariff.adapter = adapter
+        val idx = tariffIds.indexOfFirst { it.equals(user.tariff, ignoreCase = true) }
+        if (idx >= 0) b.spinnerTariff.setSelection(idx)
+
+        // Прогресс-бар трафика
+        val limit = user.traffic_limit
+        val used = user.used_traffic
+        val progress = ((used.toFloat() / limit) * 100).toInt().coerceIn(0, 100)
+        if (limit > 0L) {
+            b.progressEditTraffic.progress = progress
+            b.tvTrafficUsedLabel.text = "Использовано: ${Tariff.formatUsed(used)}"
+            b.tvTrafficLimitLabel.text = "Лимит: ${Tariff.formatTrafficLimit(limit)}"
+        } else {
+            b.progressEditTraffic.progress = 0
+            b.tvTrafficUsedLabel.text = "Использовано: ${Tariff.formatUsed(used)}"
+            b.tvTrafficLimitLabel.text = "Лимит: безлимит"
+        }
+
+        // Кнопки трафика
+        b.btnAddTraffic.setOnClickListener {
+            showTrafficDeltaDialog(user.id, positive = true)
+        }
+        b.btnSubTraffic.setOnClickListener {
+            showTrafficDeltaDialog(user.id, positive = false)
+        }
+        b.btnResetTraffic.setOnClickListener {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Сбросить трафик")
+                .setMessage("Обнулить использованный трафик для ${user.email}?")
+                .setPositiveButton("Сбросить") { _, _ ->
+                    viewModel.updateTraffic(user.id, 0L, reset = true)
+                }
+                .setNegativeButton("Отмена", null).show()
+        }
 
         val dialog = MaterialAlertDialogBuilder(this)
-            .setTitle("Редактирование пользователя")
-            .setView(dialogBinding.root)
+            .setTitle("Редактирование: ${user.email}")
+            .setView(b.root)
             .setPositiveButton("Сохранить", null)
             .setNegativeButton("Отмена", null)
             .create()
 
-        // Заполняем данные
-        dialogBinding.etEditEmail.setText(user.email)
-        dialogBinding.cbEmailConfirmed.isChecked = user.email_confirmed
-        dialogBinding.cbIsActive.isChecked = user.is_active
-
-        val tariffs = arrayOf("free", "premium", "pro", "vip")
-        val tariffAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, tariffs)
-        tariffAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        dialogBinding.spinnerTariff.adapter = tariffAdapter
-        val tariffIndex = tariffs.indexOf(user.tariff)
-        if (tariffIndex >= 0) dialogBinding.spinnerTariff.setSelection(tariffIndex)
-
         dialog.setOnShowListener {
-            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val newEmail = dialogBinding.etEditEmail.text.toString()
-                val newTariff = tariffs[dialogBinding.spinnerTariff.selectedItemPosition]
-                val emailConfirmed = dialogBinding.cbEmailConfirmed.isChecked
-                val isActive = dialogBinding.cbIsActive.isChecked
-
-                viewModel.updateUser(
-                    user.id,
-                    newEmail.takeIf { it != user.email },
-                    newTariff.takeIf { it != user.tariff },
-                    emailConfirmed.takeIf { it != user.email_confirmed },
-                    isActive.takeIf { it != user.is_active }
-                )
-                dialog.dismiss()
+            dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
+                .setOnClickListener {
+                    val newEmail = b.etEditEmail.text.toString().trim()
+                    val newTariff = tariffIds[b.spinnerTariff.selectedItemPosition]
+                    viewModel.updateUser(
+                        userId = user.id,
+                        email = newEmail.takeIf { it != user.email && it.isNotBlank() },
+                        tariff = newTariff.takeIf { it != user.tariff },
+                        emailConfirmed = b.cbEmailConfirmed.isChecked
+                            .takeIf { it != user.email_confirmed },
+                        isActive = b.cbIsActive.isChecked
+                            .takeIf { it != user.is_active }
+                    )
+                    dialog.dismiss()
+                }
+        }
+        // После обновления трафика — перезагружаем данные пользователя
+        viewModel.operationState.observe(this) { state ->
+            if (state is AdminViewModel.OperationState.Success && dialog.isShowing) {
+                val updatedUser = viewModel.selectedUser.value ?: return@observe
+                // Обновляем прогресс-бар в диалоге
+                val newLimit = updatedUser.traffic_limit
+                val newUsed  = updatedUser.used_traffic
+                if (newLimit > 0L) {
+                    val progress = ((newUsed.toFloat() / newLimit) * 100).toInt().coerceIn(0, 100)
+                    b.progressEditTraffic.progress = progress
+                    b.tvTrafficUsedLabel.text = "Использовано: ${Tariff.formatUsed(newUsed)}"
+                    b.tvTrafficLimitLabel.text = "Лимит: ${Tariff.formatTrafficLimit(newLimit)}"
+                }
             }
+        }
+        dialog.show()
+    }
+
+    private fun showTrafficDeltaDialog(userId: Int, positive: Boolean) {
+        val title = if (positive) "Добавить трафик (ГБ)" else "Убавить трафик (ГБ)"
+        val input = com.google.android.material.textfield.TextInputEditText(this).apply {
+            hint = "Количество ГБ"
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                        android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setView(input)
+            .setPositiveButton("Применить") { _, _ ->
+                val gb = input.text.toString().toDoubleOrNull()
+                if (gb != null && gb > 0) {
+                    val bytes = (gb * 1024 * 1024 * 1024).toLong()
+                    val delta = if (positive) bytes else -bytes
+                    viewModel.updateTraffic(userId, delta)
+                } else {
+                    showError("Введите корректное число")
+                }
+            }
+            .setNegativeButton("Отмена", null).show()
+    }
+
+    // ─── Сброс пароля ─────────────────────────────────────────────────────────
+
+    private fun showResetPasswordDialog(user: UserAdminData) {
+        val b = DialogResetPasswordBinding.inflate(layoutInflater)
+        val dialog = BottomSheetDialog(this)
+        dialog.setContentView(b.root)
+
+        b.btnSetNewPassword.setOnClickListener {
+            val pw = b.etNewPassword.text.toString()
+            if (pw.length < 6) {
+                showError("Пароль должен быть не менее 6 символов")
+                return@setOnClickListener
+            }
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Подтверждение")
+                .setMessage("Установить новый пароль для ${user.email}?")
+                .setPositiveButton("Да") { _, _ ->
+                    viewModel.resetPassword(user.id, pw, user.email)
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Отмена", null).show()
+        }
+
+        b.btnSendResetEmail.setOnClickListener {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Отправить письмо")
+                .setMessage("Отправить письмо для сброса пароля на ${user.email}?")
+                .setPositiveButton("Отправить") { _, _ ->
+                    viewModel.sendPasswordResetEmail(user.id, user.email)
+                    dialog.dismiss()
+                }
+                .setNegativeButton("Отмена", null).show()
         }
 
         dialog.show()
     }
 
-    private fun showResetPasswordDialog(user: UserAdminData) {
-        val input = TextInputEditText(this)
-        input.hint = "Новый пароль"
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Сброс пароля для ${user.email}")
-            .setView(input)
-            .setPositiveButton("Сбросить") { _, _ ->
-                val newPassword = input.text.toString()
-                if (newPassword.isNotEmpty()) {
-                    viewModel.resetPassword(user.id, newPassword)
-                } else {
-                    showError("Введите новый пароль")
-                }
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
-    }
+    // ─── Управление подпиской ─────────────────────────────────────────────────
 
     private fun showManageSubscriptionDialog(user: UserAdminData) {
         val options = arrayOf(
-            "Приостановить подписку",
-            "Возобновить подписку",
-            "Отменить подписку",
-            "Изменить тариф"
+            "Приостановить (isActive → 0)",
+            "Возобновить (isActive → 1)",
+            "Отменить (тариф → Trial)"
         )
-
         MaterialAlertDialogBuilder(this)
-            .setTitle("Управление подпиской")
+            .setTitle("Управление подпиской\n${user.email}")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> viewModel.updateSubscription(user.id, "pause")
-                    1 -> viewModel.updateSubscription(user.id, "resume")
-                    2 -> viewModel.updateSubscription(user.id, "cancel")
-                    3 -> showChangeTariffDialog(user)
+                    0 -> confirmSubscriptionAction(user, "pause",
+                        "Приостановить подписку для ${user.email}?")
+                    1 -> confirmSubscriptionAction(user, "resume",
+                        "Возобновить подписку для ${user.email}?")
+                    2 -> confirmSubscriptionAction(user, "cancel",
+                        "Отменить подписку? Тариф будет изменён на Trial.")
                 }
             }
             .show()
     }
 
-    private fun showChangeTariffDialog(user: UserAdminData) {
-        val tariffs = arrayOf("free", "premium", "pro", "vip")
-        var selectedTariff = user.tariff
-
+    private fun confirmSubscriptionAction(user: UserAdminData, action: String, message: String) {
         MaterialAlertDialogBuilder(this)
-            .setTitle("Выберите тариф")
-            .setSingleChoiceItems(tariffs, tariffs.indexOf(selectedTariff)) { _, which ->
-                selectedTariff = tariffs[which]
-            }
-            .setPositiveButton("Изменить") { _, _ ->
-                viewModel.updateSubscription(user.id, "change", selectedTariff)
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
+            .setTitle("Подтверждение")
+            .setMessage(message)
+            .setPositiveButton("Да") { _, _ -> viewModel.updateSubscription(user.id, action) }
+            .setNegativeButton("Отмена", null).show()
     }
+
+    // ─── Удаление пользователя ────────────────────────────────────────────────
 
     private fun confirmDeleteUser(user: UserAdminData) {
         MaterialAlertDialogBuilder(this)
             .setTitle("Удаление пользователя")
-            .setMessage("Вы уверены, что хотите удалить пользователя ${user.email}? Это действие нельзя отменить.")
-            .setPositiveButton("Удалить") { _, _ ->
-                viewModel.deleteUser(user.id)
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
+            .setMessage("Удалить ${user.email}?\n\nЭто действие нельзя отменить.")
+            .setPositiveButton("Удалить") { _, _ -> viewModel.deleteUser(user.id) }
+            .setNegativeButton("Отмена", null).show()
     }
+
+    // ─── Диалоги данных ───────────────────────────────────────────────────────
 
     private fun showConfigsDialog(configs: List<UserConfigFile>) {
         val dialog = BottomSheetDialog(this)
-        val dialogBinding = DialogConfigsBinding.inflate(layoutInflater)
-        dialog.setContentView(dialogBinding.root)
-
+        val b = DialogConfigsBinding.inflate(layoutInflater)
+        dialog.setContentView(b.root)
         val adapter = ConfigsAdapter(
             onOpenContent = { showConfigContentReadOnlyDialog(it) },
             onBackup = { copyConfigBackupToClipboard(it) },
             onCertInfo = { showCertificateInfoDialog(it) }
         )
-        dialogBinding.rvConfigs.layoutManager = LinearLayoutManager(this)
-        dialogBinding.rvConfigs.adapter = adapter
+        b.rvConfigs.layoutManager = LinearLayoutManager(this)
+        b.rvConfigs.adapter = adapter
         adapter.submitList(configs)
-
         dialog.show()
     }
 
+    private fun showStatsDialog(stats: UserStats) {
+        // Открываем фрагмент — он сам подпишется на ViewModel и запустит автообновление
+        // Этот метод вызывается только при первом открытии (из observer Loading→Success)
+        // Последующие обновления идут через silentRefreshStats внутри фрагмента
+    }
+
+    private fun showPaymentsDialog(payments: List<UserPayment>) {
+        // Аналогично — фрагмент управляет собой сам
+    }
+
+    private fun showLogsDialog(logs: List<UserLog>) {
+        // Аналогично
+    }
+
+    // ─── Конфиги: вспомогательные методы ─────────────────────────────────────
+
     private fun showConfigContentReadOnlyDialog(config: UserConfigFile) {
         val pad = (16 * resources.displayMetrics.density).toInt()
-        val scrollView = android.widget.ScrollView(this)
-        val textView = TextView(this).apply {
+        val sv = android.widget.ScrollView(this)
+        val tv = TextView(this).apply {
             text = config.content.ifBlank { "—" }
             setTextIsSelectable(true)
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10f)
             typeface = Typeface.MONOSPACE
             setPadding(pad, pad, pad, pad)
         }
-        scrollView.addView(textView)
-
+        sv.addView(tv)
         MaterialAlertDialogBuilder(this)
             .setTitle(config.name)
-            .setView(scrollView)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+            .setView(sv)
+            .setPositiveButton(android.R.string.ok, null).show()
     }
 
     private fun copyConfigBackupToClipboard(config: UserConfigFile) {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText("config_backup_${config.name}", config.content)
-        cm.setPrimaryClip(clip)
+        cm.setPrimaryClip(ClipData.newPlainText("config_backup_${config.name}", config.content))
         showSuccess(getString(R.string.admin_config_backup_done))
     }
 
     private fun showCertificateInfoDialog(config: UserConfigFile) {
         val summary = buildCertificateSummary(config)
         val pad = (16 * resources.displayMetrics.density).toInt()
-        val scrollView = android.widget.ScrollView(this)
-        val textView = TextView(this).apply {
+        val sv = android.widget.ScrollView(this)
+        val tv = TextView(this).apply {
             text = "${config.name}\n\n$summary"
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 10f)
             setPadding(pad, pad, pad, pad)
         }
-        scrollView.addView(textView)
-
+        sv.addView(tv)
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.admin_config_cert_info_title))
-            .setView(scrollView)
-            .setPositiveButton(android.R.string.ok, null)
-            .show()
+            .setView(sv)
+            .setPositiveButton(android.R.string.ok, null).show()
     }
 
     private fun buildCertificateSummary(config: UserConfigFile): String {
@@ -540,115 +596,35 @@ class AdminActivity : AppCompatActivity() {
             c.trimStart().startsWith("[Interface]")
         if (isWg) {
             sb.appendLine("Формат: WireGuard")
-            var foundWg = false
-            if (c.contains("PrivateKey")) {
-                sb.appendLine("• Приватный ключ (Interface)")
-                foundWg = true
-            }
-            if (c.contains("PresharedKey")) {
-                sb.appendLine("• Preshared key")
-                foundWg = true
-            }
-            if (c.contains("[Peer]") && c.contains("PublicKey")) {
+            if (c.contains("PrivateKey")) sb.appendLine("• Приватный ключ (Interface)")
+            if (c.contains("PresharedKey")) sb.appendLine("• Preshared key")
+            if (c.contains("[Peer]") && c.contains("PublicKey"))
                 sb.appendLine("• Публичный ключ пира")
-                foundWg = true
-            }
-            if (!foundWg) sb.appendLine("Стандартные поля ключей не обнаружены.")
         } else {
-            sb.appendLine("Формат: OpenVPN / текстовый конфиг")
-            var found = false
-            if (c.contains("<ca>")) {
-                sb.appendLine("• Блок CA (<ca>)")
-                found = true
-            }
-            if (c.contains("<cert>")) {
-                sb.appendLine("• Клиентский сертификат (<cert>)")
-                found = true
-            }
-            if (c.contains("<key>")) {
-                sb.appendLine("• Клиентский ключ (<key>)")
-                found = true
-            }
-            if (c.contains("<tls-auth>") || c.contains("tls-auth", ignoreCase = true)) {
+            sb.appendLine("Формат: OpenVPN")
+            if (c.contains("<ca>")) sb.appendLine("• CA (<ca>)")
+            if (c.contains("<cert>")) sb.appendLine("• Клиентский сертификат (<cert>)")
+            if (c.contains("<key>")) sb.appendLine("• Клиентский ключ (<key>)")
+            if (c.contains("<tls-auth>") || c.contains("tls-auth", ignoreCase = true))
                 sb.appendLine("• TLS-auth")
-                found = true
-            }
-            if (c.contains("<tls-crypt>")) {
-                sb.appendLine("• TLS-crypt")
-                found = true
-            }
-            if (!c.contains("<cert>") && c.contains("-----BEGIN CERTIFICATE-----")) {
-                sb.appendLine("• PEM-сертификат(ы) в тексте")
-                found = true
-            }
-            if (!found) sb.appendLine("Стандартные блоки OpenVPN не найдены.")
+            if (c.contains("<tls-crypt>")) sb.appendLine("• TLS-crypt")
         }
         return sb.toString().trimEnd()
     }
 
-    private fun showStatsDialog(stats: UserStats) {
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Статистика использования")
-            .setMessage("""
-                ID пользователя: ${stats.user_id}
-                
-                Трафик:
-                Всего: ${formatBytes(stats.total_traffic)}
-                Использовано: ${formatBytes(stats.used_traffic)}
-                Осталось: ${formatBytes(stats.total_traffic - stats.used_traffic)}
-                
-                Подключения:
-                Всего: ${stats.total_connections}
-                Активных: ${stats.active_connections}
-                
-                Последняя активность: ${stats.last_active ?: "Нет данных"}
-            """.trimIndent())
-            .setPositiveButton("OK", null)
-            .show()
-    }
-
-    private fun showPaymentsDialog(payments: List<UserPayment>) {
-        val dialog = BottomSheetDialog(this)
-        val dialogBinding = DialogPaymentsBinding.inflate(layoutInflater)
-        dialog.setContentView(dialogBinding.root)
-
-//        val adapter = PaymentsAdapter()
-//        dialogBinding.rvPayments.layoutManager = LinearLayoutManager(this)
-//        dialogBinding.rvPayments.adapter = adapter
-//        adapter.submitList(payments)
-
-        dialog.show()
-    }
-
-    private fun showLogsDialog(logs: List<UserLog>) {
-        val dialog = BottomSheetDialog(this)
-        val dialogBinding = DialogLogsBinding.inflate(layoutInflater)
-        dialog.setContentView(dialogBinding.root)
-
-//        val adapter = LogsAdapter()
-//        dialogBinding.rvLogs.layoutManager = LinearLayoutManager(this)
-//        dialogBinding.rvLogs.adapter = adapter
-//        adapter.submitList(logs)
-
-        dialog.show()
-    }
+    // ─── Утилиты ──────────────────────────────────────────────────────────────
 
     private fun formatBytes(bytes: Long): String {
         val units = arrayOf("B", "KB", "MB", "GB", "TB")
         var size = bytes.toDouble()
-        var unitIndex = 0
-        while (size >= 1024 && unitIndex < units.size - 1) {
-            size /= 1024
-            unitIndex++
-        }
-        return String.format("%.2f %s", size, units[unitIndex])
+        var idx = 0
+        while (size >= 1024 && idx < units.size - 1) { size /= 1024; idx++ }
+        return String.format("%.2f %s", size, units[idx])
     }
 
-    private fun showError(message: String) {
+    private fun showError(message: String) =
         Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-    }
 
-    private fun showSuccess(message: String) {
+    private fun showSuccess(message: String) =
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
 }

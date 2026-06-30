@@ -15,6 +15,9 @@ interface VpnConfigDao {
     @Query("SELECT * FROM vpn_configs WHERE userId = :userId ORDER BY createdAt DESC")
     fun observeAllByUser(userId: Long): Flow<List<VpnConfigEntity>>
 
+    @Query("SELECT * FROM vpn_configs WHERE userId = :userId ORDER BY createdAt DESC")
+    suspend fun getAllByUser(userId: Long): List<VpnConfigEntity>
+
     @Query("SELECT COUNT(*) FROM vpn_configs WHERE userId = :userId AND source = :source")
     suspend fun countBySource(userId: Long, source: String): Int
 
@@ -26,6 +29,9 @@ interface VpnConfigDao {
 
     @Query("UPDATE vpn_configs SET isFavorite = :favorite WHERE id = :id AND userId = :userId")
     suspend fun setFavorite(id: Long, userId: Long, favorite: Boolean)
+
+    @Query("UPDATE vpn_configs SET name = :name WHERE id = :id AND userId = :userId")
+    suspend fun rename(id: Long, userId: Long, name: String)
 
     @Query("SELECT COUNT(*) FROM vpn_configs WHERE userId = :userId AND isFavorite = 1")
     suspend fun getFavoriteCount(userId: Long): Int

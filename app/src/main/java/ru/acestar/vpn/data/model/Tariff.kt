@@ -3,26 +3,27 @@ package ru.acestar.vpn.data.model
 /**
  * Описание всех тарифов приложения.
  * trafficLimitBytes = null означает безлимитный трафик.
- * durationDays = null означает бессрочный тариф.
+ * durationDays = null и durationHours = null означает бессрочный тариф.
  */
 enum class Tariff(
     val id: String,
     val displayName: String,
     val trafficLimitBytes: Long?,   // null = безлимит
-    val durationDays: Int?,         // null = бессрочно
+    val durationDays: Int?,         // null = не ограничен по дням
+    val durationHours: Int? = null, // для часовых тарифов
     val isUnlimited: Boolean = trafficLimitBytes == null
 ) {
     TRIAL(
         id = "Trial",
         displayName = "Пробный",
-        trafficLimitBytes = null,   // безлимит по трафику
-        durationDays = 7            // 7 дней
+        trafficLimitBytes = null,
+        durationDays = 7
     ),
     UNLIMITED(
         id = "Unlimited",
         displayName = "Безлимитный",
-        trafficLimitBytes = null,   // безлимит
-        durationDays = null         // бессрочно
+        trafficLimitBytes = null,
+        durationDays = null
     ),
     BASIC(
         id = "Basic",
@@ -39,14 +40,15 @@ enum class Tariff(
     PREMIUM(
         id = "Premium",
         displayName = "Премиум",
-        trafficLimitBytes = null,   // безлимит
+        trafficLimitBytes = null,
         durationDays = 365
     ),
     HOUR(
         id = "Hour",
         displayName = "Часовой",
         trafficLimitBytes = 1L * 1024 * 1024 * 1024,   // 1 ГБ
-        durationDays = null         // ограничен по трафику, не по времени
+        durationDays = null,
+        durationHours = 1                               // 1 час
     );
 
     companion object {

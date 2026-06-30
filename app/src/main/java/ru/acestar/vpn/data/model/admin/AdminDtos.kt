@@ -26,10 +26,9 @@ data class AdminUsageLogDto(
     val message: String,
     val createdAtMs: Long
 )
+
 @Serializable
-data class AdminLoginRequest(
-    val password: String
-)
+data class AdminLoginRequest(val password: String)
 
 @Serializable
 data class AdminLoginResponse(
@@ -54,7 +53,9 @@ data class UserAdminData(
     val email_confirmed: Boolean,
     val create_date: String,
     val subscription_expiry: String? = null,
-    val is_active: Boolean = true
+    val is_active: Boolean = true,
+    val used_traffic: Long = 0L,
+    val traffic_limit: Long = 0L
 )
 
 data class UserConfigFile(
@@ -66,21 +67,24 @@ data class UserConfigFile(
     val category: String? = null,
     val protocol: String? = null,
     val config: String? = null,
-    val content: String
+    val content: String,
+    /**
+     * Группа авто-режима: "auto1" | "auto2" | null.
+     * Сервер возвращает это поле в списке конфигов.
+     * null или отсутствие = "auto1" (основной авто-режим).
+     */
+    val group: String? = null
 ) {
-    val modifiedDate: Date
-        get() = Date((modified * 1000).toLong())
-
-    val sizeFormatted: String
-        get() {
-            val kb = size / 1024.0
-            val mb = kb / 1024.0
-            return when {
-                mb >= 1 -> String.format("%.2f MB", mb)
-                kb >= 1 -> String.format("%.2f KB", kb)
-                else -> "$size B"
-            }
+    val modifiedDate: Date get() = Date((modified * 1000).toLong())
+    val sizeFormatted: String get() {
+        val kb = size / 1024.0
+        val mb = kb / 1024.0
+        return when {
+            mb >= 1 -> String.format("%.2f MB", mb)
+            kb >= 1 -> String.format("%.2f KB", kb)
+            else -> "$size B"
         }
+    }
 }
 
 @Serializable
@@ -95,13 +99,13 @@ data class UpdateUserRequest(
     val email: String? = null,
     val tariff: String? = null,
     val email_confirmed: Boolean? = null,
-    val is_active: Boolean? = null
+    val is_active: Boolean? = null,
+    val used_traffic: Long? = null,
+    val traffic_limit: Long? = null
 )
 
 @Serializable
-data class ResetPasswordRequest(
-    val new_password: String
-)
+data class ResetPasswordRequest(val new_password: String)
 
 @Serializable
 data class UserStatsResponse(
@@ -117,7 +121,10 @@ data class UserStats(
     val used_traffic: Long,
     val last_active: String? = null,
     val total_connections: Int,
-    val active_connections: Int
+    val active_connections: Int,
+    val last_login: String? = null,
+    val login_count: Int = 0,
+    val last_ip: String? = null
 )
 
 @Serializable
@@ -134,7 +141,10 @@ data class UserPayment(
     val currency: String,
     val status: String,
     val created_at: String,
-    val description: String? = null
+    val description: String? = null,
+    val tariff: String? = null,
+    val period: String? = null,
+    val source: String? = null   // "payment" | "ad"
 )
 
 @Serializable
@@ -155,6 +165,19 @@ data class UserLog(
 
 @Serializable
 data class UpdateSubscriptionRequest(
-    val action: String, // pause, resume, cancel
+    val action: String,   // pause | resume | cancel
     val tariff: String? = null
+)
+
+/** Запрос на изменение трафика пользователя */
+@Serializable
+data class UpdateTrafficRequest(
+    val delta_bytes: Long,   // положительное — добавить, отрицательное — убавить
+    val reset: Boolean = false
+)
+
+/** Запрос на сброс пароля через email */
+@Serializable
+data class SendPasswordResetEmailRequest(
+    val email: String
 )

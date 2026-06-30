@@ -26,10 +26,12 @@ interface UserDao {
     @Query("""
         UPDATE users
         SET  email = :email, emailConfirmed = :isConfirmed, tariff = :tariff, 
-            isNew = :isNew, isActive = :isActive, subsEndDate = :subsEndDate
+            isNew = :isNew, isActive = :isActive, subsEndDate = :subsEndDate,
+            usedTrafficBytes = :usedTrafficBytes, trafficLimit = :trafficLimit
         WHERE id = :id""")
     suspend fun updateUser(id: Long, email: String?, isConfirmed: Boolean,
-                           tariff: String, isNew: Boolean, isActive: Boolean, subsEndDate: Long?)
+                           tariff: String, isNew: Boolean, isActive: Boolean,
+                           subsEndDate: Long?, usedTrafficBytes: Long, trafficLimit: Long)
 
     @Query("UPDATE users SET usedTrafficBytes = usedTrafficBytes + :bytes WHERE id = :userId")
     suspend fun addUsedTraffic(userId: Long, bytes: Long)

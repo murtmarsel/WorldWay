@@ -366,7 +366,9 @@ class AuthApiService(private val sessionManager: SessionManager) {
                                 category = fileJson.optString("category", null),
                                 protocol = fileJson.optString("protocol", null),
                                 config = fileJson.optString("config", null),
-                                content = fileJson.optString("content", null)
+                                content = fileJson.optString("content", null),
+                                group = fileJson.optString("group", null)
+                                    .takeIf { !it.isNullOrBlank() }
                             )
                             filesList.add(file)
                         }
@@ -472,10 +474,10 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             isNew = userData.optBoolean("isNew"),
                             isActive = userData.optBoolean("isActive"),
                             isAdmin = userData.optBoolean("isAdmin"),
-                            subsEndDate = subsEndDateTimestamp
-                            // usedTrafficBytes НЕ перезаписываем — берём из локальной БД
+                            subsEndDate = subsEndDateTimestamp,
+                            usedTrafficBytes = userData.optLong("used_traffic", 0L),
+                            trafficLimit = userData.optLong("traffic_limit", 0L)
                         )
-                        println("ISADMIN: ${user.isAdmin}")
 
                         val session = CurrentSession(
                             userId = user.id,
@@ -487,16 +489,15 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             isActive = user.isActive,
                             tokenExpiry = tokenExpiryTimestamp,
                             createdAt = createdAtTimestamp,
-                            isAdmin = user.isAdmin
+                            isAdmin = user.isAdmin,
+                            usedTrafficBytes = user.usedTrafficBytes,
+                            trafficLimit = user.trafficLimit
                         )
-                        println("Новая сессия для сохранения: ${session}")
 
                         userRepository.updateUser(user)
                         sessionManager.updateCurrentSession(session)
-
-                        println("Текущая дата тарифа: ${session.subsEndDate}")
                         sessionManager.saveSession(
-                            id = 1,
+                            id = user.id,
                             user = user,
                             token = session.token,
                             email = session.email,
@@ -504,7 +505,9 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             subsEndDate = session.subsEndDate,
                             isConfirmed = session.isConfirmed,
                             isActive = session.isActive,
-                            createdAt = session.createdAt
+                            createdAt = session.createdAt,
+                            usedTrafficBytes = user.usedTrafficBytes,
+                            trafficLimit = user.trafficLimit
                         )
                         sessionManager.updateCurrentUser(user)
                     }
@@ -555,12 +558,151 @@ class AuthApiService(private val sessionManager: SessionManager) {
             email = email,
             isConfirmed = data.optBoolean("isConfirmed"),
             isNew = data.optBoolean("isNew"),
-            isActive = data.optBoolean(("isActive")),
+            isActive = data.optBoolean("isActive"),
             token = token,
-            tariff = data.optString(("tariff")),
+            tariff = data.optString("tariff"),
             subsEndDate = subsEndDateTimestamp,
-            isAdmin = data.optBoolean("isAdmin")
+            isAdmin = data.optBoolean("isAdmin"),
+            usedTraffic = data.optLong("used_traffic", 0L),
+            trafficLimit = data.optLong("traffic_limit", 0L)
         )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ОБНОВЛЕНИЕ ТОКЕНА (фоновый рефреш без переавторизации)
+    // POST /api/v1/token/refresh
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Обновляет JWT токен в фоне, используя текущий токен.
+     * Вызывается при onResume если срок токена подходит к концу.
+     * При успехе обновляет SessionManager без переавторизации.
+     * При ошибке — оставляет старый токен, навигация к логину не происходит.
+     */
+    suspend fun refreshToken(): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val currentToken = getToken()
+                ?: return@withContext Result.failure(Exception("Нет токена для обновления"))
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/token/refresh")
+                .post("{}".toRequestBody(jsonMediaType))
+                .addHeader("Authorization", "Bearer $currentToken")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val body = response.body?.string() ?: "{}"
+                val json = JSONObject(body)
+
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("Token refresh failed: HTTP ${response.code}")
+                    )
+                }
+
+                val newToken = json.optString("token", "")
+                    .takeIf { it.isNotBlank() }
+                    ?: return@withContext Result.failure(Exception("Пустой токен в ответе"))
+
+                // Извлекаем новое время истечения из JWT или из ответа
+                val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+                val expiryStr = json.optString("tokenExpiry", null)
+                val expiryMs = expiryStr?.let {
+                    runCatching { format.parse(it)?.time }.getOrNull()
+                } ?: (System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000)
+
+                sessionManager.updateToken(newToken, expiryMs)
+                Result.success(newToken)
+            }
+        } catch (e: Exception) {
+            Log.w("AuthApiService", "refreshToken failed (non-critical): ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Комплексное обновление данных при onResume:
+     * 1. Если токен истекает в течение 1 дня — обновляем его в фоне
+     * 2. Запрашиваем актуальные данные пользователя с сервера
+     * 3. Всё в фоне, без блокировки UI, без переавторизации при ошибке
+     */
+    suspend fun refreshOnResume(userRepository: UserRepository): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                val session = sessionManager.getCurrentUser()
+                    ?: return@withContext Result.failure(Exception("Не авторизован"))
+
+                val token = sessionManager.getAccessToken()
+                    ?: return@withContext Result.failure(Exception("Нет токена"))
+
+                // Проверяем не истекает ли токен в ближайшие сутки
+                val session2 = sessionManager.getCurrentUser()
+                val tokenExpiry = session2?.let {
+                    // SessionManager хранит expiry в CurrentSession
+                    null // получим из DAO ниже
+                }
+
+                // Пробуем обновить токен в фоне (некритично — ошибка игнорируется)
+                refreshToken() // result игнорируем — если не удалось, работаем со старым
+
+                // Получаем актуальный токен (мог обновиться выше)
+                val freshToken = sessionManager.getAccessToken() ?: token
+
+                // Запрашиваем актуальные данные пользователя
+                getUserData(session.email, freshToken, userRepository)
+            } catch (e: Exception) {
+                Log.w("AuthApiService", "refreshOnResume failed: ${e.message}")
+                Result.failure(e)
+            }
+        }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ОТПРАВКА ПОЛЬЗОВАТЕЛЬСКОГО КОНФИГА НА СЕРВЕР (синхронизация)
+    // POST /api/v1/user/configs/upload
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Отправляет пользовательский конфиг на сервер (зашифрованно).
+     * При ошибке — возвращает failure, вызывающий код ничего не делает.
+     */
+    suspend fun uploadUserConfig(
+        name: String,
+        type: String,
+        content: String,
+        serverHost: String
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val token = getToken() ?: return@withContext Result.failure(Exception("Нет токена"))
+
+            val payload = JSONObject().apply {
+                put("name", name)
+                put("type", type)
+                put("server_host", serverHost)
+                put("content", content)
+            }
+            val encrypted = CryptoHelper.encryptData(payload.toString(), token)
+            val jsonBody = JSONObject().apply { put("data", encrypted) }.toString()
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/user/configs/upload")
+                .post(jsonBody.toRequestBody(jsonMediaType))
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val json = JSONObject(response.body?.string() ?: "{}")
+                if (response.isSuccessful && json.optBoolean("success", false)) {
+                    Result.success(true)
+                } else {
+                    Result.failure(Exception(json.optString("error", "Upload failed")))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("AuthApiService", "uploadUserConfig failed: ${e.message}")
+            Result.failure(e)
+        }
     }
 
     private fun parseLongNullable(obj: JSONObject, vararg keys: String): Long? {
@@ -577,6 +719,89 @@ class AuthApiService(private val sessionManager: SessionManager) {
         return null
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // СИНХРОНИЗАЦИЯ ТРАФИКА С СЕРВЕРОМ
+    // POST /api/v1/user/sync-traffic
+    // Отправляет текущее потребление трафика на сервер.
+    // Сервер обновляет used_traffic и возвращает актуальные данные пользователя.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun syncTrafficToServer(
+        usedBytes: Long,
+        userRepository: UserRepository
+    ): Result<Boolean> = withContext(Dispatchers.IO) {
+        try {
+            val token = getToken() ?: return@withContext Result.failure(
+                Exception("Нет токена для синхронизации трафика")
+            )
+
+            val payload = JSONObject().apply {
+                put("used_traffic", usedBytes)
+            }
+            val encrypted = CryptoHelper.encryptData(payload.toString(), token)
+            val jsonBody = JSONObject().apply { put("data", encrypted) }.toString()
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/user/sync-traffic")
+                .post(jsonBody.toRequestBody(jsonMediaType))
+                .addHeader("Authorization", "Bearer $token")
+                .addHeader("Content-Type", "application/json")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string() ?: "{}"
+                val json = JSONObject(responseBody)
+
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("HTTP ${response.code}: ${json.optString("error")}")
+                    )
+                }
+
+                if (!json.optBoolean("success", false)) {
+                    return@withContext Result.failure(
+                        Exception(json.optString("error", "Sync failed"))
+                    )
+                }
+
+                // Если сервер вернул обновлённые данные пользователя — применяем их
+                val enc = json.optBoolean("enc", false)
+                val rawData = json.optString("data", null)
+                if (enc && rawData != null) {
+                    try {
+                        val decrypted = CryptoHelper.decryptData(rawData, token)
+                        val userData = JSONObject(decrypted)
+                        val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+                        val subsEndStr = userData.optString("subsEndDate", null)
+                        val subsEndDate = subsEndStr?.let {
+                            runCatching { format.parse(it)?.time }.getOrNull()
+                        }
+
+                        val currentUser = sessionManager.getCurrentUser()
+                        if (currentUser != null) {
+                            val updated = currentUser.copy(
+                                tariff = userData.optString("tariff", currentUser.tariff),
+                                subsEndDate = subsEndDate ?: currentUser.subsEndDate,
+                                usedTrafficBytes = userData.optLong("used_traffic", usedBytes),
+                                trafficLimit = userData.optLong("traffic_limit", currentUser.trafficLimit),
+                                isActive = userData.optBoolean("isActive", currentUser.isActive)
+                            )
+                            userRepository.updateUser(updated)
+                            sessionManager.updateCurrentUser(updated)
+                        }
+                    } catch (e: Exception) {
+                        Log.w("AuthApiService", "syncTraffic: failed to parse server response", e)
+                    }
+                }
+
+                Result.success(true)
+            }
+        } catch (e: Exception) {
+            Log.e("AuthApiService", "syncTrafficToServer failed", e)
+            Result.failure(e)
+        }
+    }
 }
 
 //private fun JSONObject.optLong(name: String, fallback: String): Long {

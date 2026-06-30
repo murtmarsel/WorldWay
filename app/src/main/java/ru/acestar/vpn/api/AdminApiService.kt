@@ -1,4 +1,3 @@
-// api/AdminApiService.kt
 package ru.acestar.vpn.api
 
 import android.util.Log
@@ -10,13 +9,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
-import ru.acestar.vpn.data.model.*
-import ru.acestar.vpn.data.model.admin.UpdateUserRequest
-import ru.acestar.vpn.data.model.admin.UserAdminData
-import ru.acestar.vpn.data.model.admin.UserConfigFile
-import ru.acestar.vpn.data.model.admin.UserLog
-import ru.acestar.vpn.data.model.admin.UserPayment
-import ru.acestar.vpn.data.model.admin.UserStats
+import ru.acestar.vpn.data.model.admin.*
 import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.utils.CryptoHelper
 import ru.acestar.vpn.utils.PasswordHasher
@@ -31,323 +24,262 @@ class AdminApiService(private val sessionManager: SessionManager) {
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val baseUrl = "http://94.249.239.35:5001" // Замените на ваш URL
+    private val baseUrl = "http://94.249.239.35:5001"
 
-//    private var adminToken: String? = getAuthHeader()
+    private suspend fun getToken(): String? = sessionManager.getAccessToken()
 
-//    fun setAdminToken(token: String?) {
-//        adminToken = token
-//    }
-
-    private suspend fun getAuthHeader(): String? {
-        val token = sessionManager.getAccessToken()
-        return if (!token.isNullOrEmpty()) "Bearer $token" else null
-    }
-    private suspend fun getToken(): String? {
-        val token = sessionManager.getAccessToken()
-        return token
-    }
-    /**
-     * Для методов админки с паролем: сначала JWT пользователя из сессии, иначе токен после [adminLogin].
-     */
     private suspend fun createRequestBuilder(url: String): Request.Builder {
         val builder = Request.Builder().url(url)
-
-        getAuthHeader()?.let { authHeader ->
-            builder.addHeader("Authorization", authHeader)
-            Log.d("AdminApiService", "🔑 Added auth header: ${authHeader.take(24)}...")
-        } ?: Log.d("AdminApiService", "⚠️ No token available")
-
+        getToken()?.let { builder.addHeader("Authorization", "Bearer $it") }
         builder.addHeader("Content-Type", "application/json")
         builder.addHeader("Accept", "application/json")
-
         return builder
     }
 
-//    private fun bearerForAdminPanel(): String? {
-//        val user = sessionManager.getAccessToken()
-//        if (user.isNotEmpty()) return "Bearer $user"
-//        val admin = adminToken
-//        if (!admin.isNullOrEmpty()) return "Bearer $admin"
-//        return null
-//    }
+    /** Шифрует payload через CryptoHelper и оборачивает в {"data": "<encrypted>"} */
+    private suspend fun encryptedBody(payload: JSONObject): String {
+        val token = getToken() ?: throw Exception("Нет токена авторизации")
+        val encrypted = CryptoHelper.encryptData(payload.toString(), token)
+        return JSONObject().apply { put("data", encrypted) }.toString()
+    }
 
-    /** Только JWT пользователя (из [SessionManager]); нужен для запросов, где расшифровка идёт тем же токеном. */
-//    private suspend fun requireUserAccessToken(): String? {
-//        val t = getToken()
-//        return t.takeIf { it.isNotEmpty() }
-//    }
+    /** Расшифровывает ответ сервера если enc=true */
+    private suspend fun decryptResponse(jsonResponse: JSONObject): JSONObject {
+        val encrypted = jsonResponse.optBoolean("enc", false)
+        val rawData = jsonResponse.optString("data", null)
+            ?: return JSONObject()
+        return if (encrypted) {
+            val token = getToken() ?: throw Exception("Нет токена для расшифровки")
+            JSONObject(CryptoHelper.decryptData(rawData, token))
+        } else {
+            JSONObject(rawData)
+        }
+    }
 
-//    private fun createAuthRequestBuilder(url: String): Request.Builder {
-//        val builder = Request.Builder().url(url)
-//        token?.let {
-//            builder.addHeader("Authorization", "Bearer $it")
-//        }
-//        return builder
-//    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // AUTH
+    // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun adminLogin(password: String): Result<String> = withContext(Dispatchers.IO) {
         try {
+            val token = getToken()
             val passwordHashed = PasswordHasher.sha256Hex(password)
-            val jsonBody = JSONObject().apply {
-                put("password", passwordHashed)
-            }.toString()
+            val jsonBody = JSONObject().apply { put("password", passwordHashed) }.toString()
 
-            val request = Request.Builder()
+            val requestBuilder = Request.Builder()
                 .url("$baseUrl/api/admin/login")
                 .post(jsonBody.toRequestBody(jsonMediaType))
-                .build()
+                .addHeader("Content-Type", "application/json")
 
-            client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
-
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("Login failed: ${response.message}"))
-                }
-
-                val jsonResponse = JSONObject(responseBody ?: "")
-                val success = jsonResponse.optBoolean("success", false)
-
-                if (success) {
-                    val token = jsonResponse.optString("token", "")
-//                    adminToken = token
-                    Result.success(token)
-                } else {
-                    val error = jsonResponse.optString("error", "Unknown error")
-                    Result.failure(Exception(error))
-                }
+            // Передаём JWT пользователя — сервер проверяет что запрос от авторизованного аккаунта
+            if (!token.isNullOrBlank()) {
+                requestBuilder.addHeader("Authorization", "Bearer $token")
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+
+            client.newCall(requestBuilder.build()).execute().use { response ->
+                val json = JSONObject(response.body?.string() ?: "{}")
+                if (!response.isSuccessful)
+                    return@withContext Result.failure(Exception(json.optString("error", "HTTP ${response.code}")))
+                if (json.optBoolean("success", false))
+                    Result.success(json.optString("token", ""))
+                else
+                    Result.failure(Exception(json.optString("error", "Login failed")))
+            }
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // USERS
+    // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun getUsers(): Result<List<UserAdminData>> = withContext(Dispatchers.IO) {
         try {
-            val request = createRequestBuilder("$baseUrl/api/admin/users")
-                .get()
-                .build()
-
+            val request = createRequestBuilder("$baseUrl/api/admin/users").get().build()
             client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
+                val json = JSONObject(response.body?.string() ?: "{}")
+                if (!response.isSuccessful)
+                    return@withContext Result.failure(Exception("HTTP ${response.code}"))
+                if (!json.optBoolean("success", false))
+                    return@withContext Result.failure(Exception(json.optString("error")))
 
-                if (!response.isSuccessful) {
-                    return@withContext Result.failure(Exception("HTTP ${response.message}"))
-                }
-
-                val jsonResponse = JSONObject(responseBody ?: "")
-                val success = jsonResponse.optBoolean("success", false)
-
-                if (!success) {
-                    val error = jsonResponse.optString("error", "Unknown error")
-                    return@withContext Result.failure(Exception(error))
-                }
-
-                val usersArray = jsonResponse.optJSONArray("data") ?: JSONArray()
-                val users = mutableListOf<UserAdminData>()
-
-                for (i in 0 until usersArray.length()) {
-                    val userJson = usersArray.getJSONObject(i)
-                    users.add(
-                        UserAdminData(
-                            id = userJson.optInt("id"),
-                            email = userJson.optString("email"),
-                            tariff = userJson.optString("tariff"),
-                            is_new = userJson.optBoolean("is_new"),
-                            email_confirmed = userJson.optBoolean("email_confirmed"),
-                            create_date = userJson.optString("create_date"),
-                            subscription_expiry = userJson.optString("subscription_expiry").takeIf { it.isNotEmpty() },
-                            is_active = userJson.optBoolean("is_active", true)
-                        )
-
-
+                val arr = json.optJSONArray("data") ?: JSONArray()
+                val users = (0 until arr.length()).map { i ->
+                    val u = arr.getJSONObject(i)
+                    UserAdminData(
+                        id = u.optInt("id"),
+                        email = u.optString("email"),
+                        tariff = u.optString("tariff"),
+                        is_new = u.optBoolean("is_new"),
+                        email_confirmed = u.optBoolean("email_confirmed"),
+                        create_date = u.optString("create_date"),
+                        subscription_expiry = u.optString("subscription_expiry").takeIf { it.isNotEmpty() },
+                        is_active = u.optBoolean("is_active", true),
+                        used_traffic = u.optLong("used_traffic", 0L),
+                        traffic_limit = u.optLong("traffic_limit", 0L)
                     )
                 }
-
                 Result.success(users)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    suspend fun getClientFilesList(clientName: Int): Result<List<UserConfigFile>> =
+    // ─────────────────────────────────────────────────────────────────────────
+    // CONFIGS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun getClientFilesList(userId: Int): Result<List<UserConfigFile>> =
         withContext(Dispatchers.IO) {
             try {
                 val token = getToken()
-                    ?: return@withContext Result.failure(
-                        Exception("Нет токена пользователя. Войдите в приложение (JWT в сессии).")
-                    )
-
-                Log.d("AdminApiService", "📤 Getting configs list for user id: $clientName")
+                    ?: return@withContext Result.failure(Exception("Нет токена"))
 
                 val request = Request.Builder()
-                    .url("$baseUrl/api/admin/users/$clientName/configs")
+                    .url("$baseUrl/api/admin/users/$userId/configs")
                     .get()
                     .addHeader("Authorization", "Bearer $token")
                     .addHeader("Content-Type", "application/json")
-                    .addHeader("Accept", "application/json")
                     .build()
 
                 client.newCall(request).execute().use { response ->
-                    val responseBody = response.body?.string()
-                    Log.d("AdminApiService", "📥 Response code: ${response.code}")
+                    val body = response.body?.string() ?: ""
+                    if (!response.isSuccessful)
+                        return@withContext Result.failure(Exception("HTTP ${response.code}"))
 
-                    if (!response.isSuccessful) {
-                        return@withContext Result.failure(
-                            Exception("HTTP ${response.code}: ${response.message}")
+                    val json = JSONObject(body)
+                    if (!json.optBoolean("success", false))
+                        return@withContext Result.failure(Exception(json.optString("error")))
+
+                    val decrypted = decryptResponse(json)
+                    val filesArray = decrypted.optJSONArray("files") ?: JSONArray()
+                    val list = (0 until filesArray.length()).map { i ->
+                        val f = filesArray.getJSONObject(i)
+                        UserConfigFile(
+                            name = f.optString("name"),
+                            path = f.optString("path"),
+                            size = f.optLong("size"),
+                            modified = f.optDouble("modified"),
+                            type = f.optString("type"),
+                            category = f.optString("category").takeIf { it.isNotEmpty() },
+                            protocol = f.optString("protocol").takeIf { it.isNotEmpty() },
+                            config = f.optString("config").takeIf { it.isNotEmpty() },
+                            content = f.optString("content", ""),
+                            group = f.optString("group").takeIf { it.isNotEmpty() }
                         )
                     }
-
-                    if (responseBody.isNullOrEmpty()) {
-                        return@withContext Result.failure(Exception("Empty response"))
-                    }
-
-                    // Парсим JSON ответ
-                    val jsonResponse = JSONObject(responseBody)
-                    val success = jsonResponse.optBoolean("success", false)
-
-                    if (!success) {
-                        val error = jsonResponse.optString("error", "Unknown error")
-                        return@withContext Result.failure(Exception(error))
-                    }
-
-                    val encrypted = jsonResponse.optBoolean("enc", false)
-                    val encryptedData = jsonResponse.optString("data", null)
-
-                    if (encrypted && encryptedData != null) {
-                        // ✅ 1. Расшифровываем данные
-                        val decryptedJson = CryptoHelper.decryptData(encryptedData, token)
-                        Log.d("AdminApiService", "🔓 Decrypted data: $decryptedJson")
-
-                        // ✅ 2. Парсим расшифрованный JSON
-                        val filesData = JSONObject(decryptedJson)
-
-                        // ✅ 3. Получаем массив files из data
-                        val filesArray = filesData.optJSONArray("files") ?: JSONArray()
-                        val filesList = mutableListOf<UserConfigFile>()
-
-                        for (i in 0 until filesArray.length()) {
-                            val fileJson = filesArray.getJSONObject(i)
-                            val file = UserConfigFile(
-                                name = fileJson.optString("name", ""),
-                                path = fileJson.optString("path", ""),
-                                size = fileJson.optLong("size", 0),
-                                modified = fileJson.optDouble("modified", 0.0),
-                                type = fileJson.optString("type", "unknown"),
-                                category = fileJson.optString("category", null),
-                                protocol = fileJson.optString("protocol", null),
-                                config = fileJson.optString("config", null),
-                                content = fileJson.optString("content", null)
-                            )
-                            filesList.add(file)
-                        }
-
-                        Result.success(filesList)
-                    } else {
-                        Result.failure(Exception("Expected encrypted data"))
-                    }
+                    Result.success(list)
                 }
-            } catch (e: Exception) {
-                Log.e("AdminApiService", "Error getting files list", e)
-                Result.failure(e)
-            }
+            } catch (e: Exception) { Result.failure(e) }
         }
 
-    suspend fun updateUser(userId: Int, request: UpdateUserRequest): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val jsonBody = JSONObject().apply {
-                request.email?.let { put("email", it) }
-                request.tariff?.let { put("tariff", it) }
-                request.email_confirmed?.let { put("email_confirmed", it) }
-                request.is_active?.let { put("is_active", it) }
-            }.toString()
+    // ─────────────────────────────────────────────────────────────────────────
+    // UPDATE USER  (зашифрованный payload)
+    // POST /api/admin/users/<id>/update
+    // ─────────────────────────────────────────────────────────────────────────
 
-            val requestBuilder = createRequestBuilder("$baseUrl/api/admin/users/$userId")
-                .put(jsonBody.toRequestBody(jsonMediaType))
-
-            client.newCall(requestBuilder.build()).execute().use { response ->
-                val responseBody = response.body?.string()
-                val jsonResponse = JSONObject(responseBody ?: "")
-                val success = jsonResponse.optBoolean("success", false)
-
-                if (success) {
-                    Result.success(true)
-                } else {
-                    val error = jsonResponse.optString("error", "Update failed")
-                    Result.failure(Exception(error))
+    suspend fun updateUser(userId: Int, req: UpdateUserRequest): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    req.email?.let { put("email", it) }
+                    req.tariff?.let { put("tariff", it) }
+                    req.email_confirmed?.let { put("email_confirmed", it) }
+                    req.is_active?.let { put("is_active", it) }
+                    req.used_traffic?.let { put("used_traffic", it) }
+                    req.traffic_limit?.let { put("traffic_limit", it) }
                 }
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+                val body = encryptedBody(payload).toRequestBody(jsonMediaType)
+                val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/update")
+                    .post(body).build()
 
-    suspend fun resetPassword(userId: Int, newPassword: String): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val jsonBody = JSONObject().apply {
-                put("new_password", newPassword)
-            }.toString()
-
-            val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/reset-password")
-                .post(jsonBody.toRequestBody(jsonMediaType))
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                val jsonResponse = JSONObject(response.body?.string() ?: "")
-                val success = jsonResponse.optBoolean("success", false)
-
-                if (success) {
-                    Result.success(true)
-                } else {
-                    val error = jsonResponse.optString("error", "Reset failed")
-                    Result.failure(Exception(error))
+                client.newCall(request).execute().use { response ->
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    if (json.optBoolean("success", false)) Result.success(true)
+                    else Result.failure(Exception(json.optString("error", "Update failed")))
                 }
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
+            } catch (e: Exception) { Result.failure(e) }
         }
-    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RESET PASSWORD  (зашифрованный payload)
+    // POST /api/admin/users/<id>/reset-password
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun resetPassword(userId: Int, newPassword: String, userEmail: String): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                // Хешируем пароль так же как при регистрации
+                val hashed = PasswordHasher.hashForServer(newPassword, userEmail)
+                val payload = JSONObject().apply { put("new_password", hashed) }
+                val body = encryptedBody(payload).toRequestBody(jsonMediaType)
+                val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/reset-password")
+                    .post(body).build()
+
+                client.newCall(request).execute().use { response ->
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    if (json.optBoolean("success", false)) Result.success(true)
+                    else Result.failure(Exception(json.optString("error", "Reset failed")))
+                }
+            } catch (e: Exception) { Result.failure(e) }
+        }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SEND PASSWORD RESET EMAIL
+    // POST /api/admin/users/<id>/send-reset-email
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun sendPasswordResetEmail(userId: Int, email: String): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply { put("email", email) }
+                val body = encryptedBody(payload).toRequestBody(jsonMediaType)
+                val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/send-reset-email")
+                    .post(body).build()
+
+                client.newCall(request).execute().use { response ->
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    if (json.optBoolean("success", false)) Result.success(true)
+                    else Result.failure(Exception(json.optString("error", "Failed to send email")))
+                }
+            } catch (e: Exception) { Result.failure(e) }
+        }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DELETE USER
+    // DELETE /api/admin/users/<id>
+    // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun deleteUser(userId: Int): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val request = createRequestBuilder("$baseUrl/api/admin/users/$userId")
-                .delete()
-                .build()
-
+                .delete().build()
             client.newCall(request).execute().use { response ->
-                val jsonResponse = JSONObject(response.body?.string() ?: "")
-                val success = jsonResponse.optBoolean("success", false)
-
-                if (success) {
-                    Result.success(true)
-                } else {
-                    val error = jsonResponse.optString("error", "Delete failed")
-                    Result.failure(Exception(error))
-                }
+                val json = JSONObject(response.body?.string() ?: "{}")
+                if (json.optBoolean("success", false)) Result.success(true)
+                else Result.failure(Exception(json.optString("error", "Delete failed")))
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // STATS  (зашифрованный ответ)
+    // GET /api/admin/users/<id>/stats
+    // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun getUserStats(userId: Int): Result<UserStats> = withContext(Dispatchers.IO) {
         try {
             val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/stats")
-                .get()
-                .build()
-
+                .get().build()
             client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
-                val jsonResponse = JSONObject(responseBody ?: "")
-                val success = jsonResponse.optBoolean("success", false)
+                val json = JSONObject(response.body?.string() ?: "{}")
+                if (!json.optBoolean("success", false))
+                    return@withContext Result.failure(Exception(json.optString("error")))
 
-                if (!success) {
-                    val error = jsonResponse.optString("error", "Unknown error")
-                    return@withContext Result.failure(Exception(error))
+                val data = if (json.optBoolean("enc", false)) {
+                    decryptResponse(json)
+                } else {
+                    json.optJSONObject("data") ?: JSONObject()
                 }
 
-                val data = jsonResponse.optJSONObject("data") ?: JSONObject()
                 Result.success(
                     UserStats(
                         user_id = data.optInt("user_id"),
@@ -355,118 +287,135 @@ class AdminApiService(private val sessionManager: SessionManager) {
                         used_traffic = data.optLong("used_traffic"),
                         last_active = data.optString("last_active").takeIf { it.isNotEmpty() },
                         total_connections = data.optInt("total_connections"),
-                        active_connections = data.optInt("active_connections")
+                        active_connections = data.optInt("active_connections"),
+                        last_login = data.optString("last_login").takeIf { it.isNotEmpty() },
+                        login_count = data.optInt("login_count"),
+                        last_ip = data.optString("last_ip").takeIf { it.isNotEmpty() }
                     )
                 )
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // PAYMENTS  (зашифрованный ответ)
+    // GET /api/admin/users/<id>/payments
+    // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun getUserPayments(userId: Int): Result<List<UserPayment>> = withContext(Dispatchers.IO) {
         try {
             val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/payments")
-                .get()
-                .build()
-
+                .get().build()
             client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
-                val jsonResponse = JSONObject(responseBody ?: "")
-                val success = jsonResponse.optBoolean("success", false)
+                val json = JSONObject(response.body?.string() ?: "{}")
+                if (!json.optBoolean("success", false))
+                    return@withContext Result.failure(Exception(json.optString("error")))
 
-                if (!success) {
-                    val error = jsonResponse.optString("error", "Unknown error")
-                    return@withContext Result.failure(Exception(error))
+                val arr = if (json.optBoolean("enc", false)) {
+                    decryptResponse(json).optJSONArray("payments") ?: JSONArray()
+                } else {
+                    json.optJSONArray("data") ?: JSONArray()
                 }
 
-                val paymentsArray = jsonResponse.optJSONArray("data") ?: JSONArray()
-                val payments = mutableListOf<UserPayment>()
-
-                for (i in 0 until paymentsArray.length()) {
-                    val paymentJson = paymentsArray.getJSONObject(i)
-                    payments.add(
-                        UserPayment(
-                            id = paymentJson.optInt("id"),
-                            amount = paymentJson.optString("amount"),
-                            currency = paymentJson.optString("currency"),
-                            status = paymentJson.optString("status"),
-                            created_at = paymentJson.optString("created_at"),
-                            description = paymentJson.optString("description").takeIf { it.isNotEmpty() }
-                        )
+                val payments = (0 until arr.length()).map { i ->
+                    val p = arr.getJSONObject(i)
+                    UserPayment(
+                        id = p.optInt("id"),
+                        amount = p.optString("amount"),
+                        currency = p.optString("currency", "RUB"),
+                        status = p.optString("status"),
+                        created_at = p.optString("created_at"),
+                        description = p.optString("description").takeIf { it.isNotEmpty() },
+                        tariff = p.optString("tariff").takeIf { it.isNotEmpty() },
+                        period = p.optString("period").takeIf { it.isNotEmpty() },
+                        source = p.optString("source").takeIf { it.isNotEmpty() }
                     )
                 }
-
                 Result.success(payments)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
 
-    suspend fun updateSubscription(userId: Int, action: String, tariff: String? = null): Result<Boolean> = withContext(Dispatchers.IO) {
-        try {
-            val jsonBody = JSONObject().apply {
-                put("action", action)
-                tariff?.let { put("tariff", it) }
-            }.toString()
-
-            val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/subscription")
-                .post(jsonBody.toRequestBody(jsonMediaType))
-                .build()
-
-            client.newCall(request).execute().use { response ->
-                val jsonResponse = JSONObject(response.body?.string() ?: "")
-                val success = jsonResponse.optBoolean("success", false)
-
-                if (success) {
-                    Result.success(true)
-                } else {
-                    val error = jsonResponse.optString("error", "Update failed")
-                    Result.failure(Exception(error))
-                }
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // LOGS
+    // GET /api/admin/users/<id>/logs
+    // ─────────────────────────────────────────────────────────────────────────
 
     suspend fun getUserLogs(userId: Int): Result<List<UserLog>> = withContext(Dispatchers.IO) {
         try {
             val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/logs")
-                .get()
-                .build()
-
+                .get().build()
             client.newCall(request).execute().use { response ->
-                val responseBody = response.body?.string()
-                val jsonResponse = JSONObject(responseBody ?: "")
-                val success = jsonResponse.optBoolean("success", false)
+                val json = JSONObject(response.body?.string() ?: "{}")
+                if (!json.optBoolean("success", false))
+                    return@withContext Result.failure(Exception(json.optString("error")))
 
-                if (!success) {
-                    val error = jsonResponse.optString("error", "Unknown error")
-                    return@withContext Result.failure(Exception(error))
+                val arr = if (json.optBoolean("enc", false)) {
+                    decryptResponse(json).optJSONArray("logs") ?: JSONArray()
+                } else {
+                    json.optJSONArray("data") ?: JSONArray()
                 }
 
-                val logsArray = jsonResponse.optJSONArray("data") ?: JSONArray()
-                val logs = mutableListOf<UserLog>()
-
-                for (i in 0 until logsArray.length()) {
-                    val logJson = logsArray.getJSONObject(i)
-                    logs.add(
-                        UserLog(
-                            id = logJson.optInt("id"),
-                            action = logJson.optString("action"),
-                            details = logJson.optString("details"),
-                            created_at = logJson.optString("created_at"),
-                            ip_address = logJson.optString("ip_address").takeIf { it.isNotEmpty() }
-                        )
+                val logs = (0 until arr.length()).map { i ->
+                    val l = arr.getJSONObject(i)
+                    UserLog(
+                        id = l.optInt("id"),
+                        action = l.optString("action"),
+                        details = l.optString("details"),
+                        created_at = l.optString("created_at"),
+                        ip_address = l.optString("ip_address").takeIf { it.isNotEmpty() }
                     )
                 }
-
                 Result.success(logs)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        } catch (e: Exception) { Result.failure(e) }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SUBSCRIPTION MANAGEMENT  (зашифрованный payload)
+    // POST /api/admin/users/<id>/subscription
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun updateSubscription(userId: Int, action: String, tariff: String? = null): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("action", action)
+                    tariff?.let { put("tariff", it) }
+                }
+                val body = encryptedBody(payload).toRequestBody(jsonMediaType)
+                val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/subscription")
+                    .post(body).build()
+
+                client.newCall(request).execute().use { response ->
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    if (json.optBoolean("success", false)) Result.success(true)
+                    else Result.failure(Exception(json.optString("error", "Subscription update failed")))
+                }
+            } catch (e: Exception) { Result.failure(e) }
+        }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // TRAFFIC MANAGEMENT  (зашифрованный payload)
+    // POST /api/admin/users/<id>/traffic
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun updateTraffic(userId: Int, deltaBytes: Long, reset: Boolean = false): Result<Boolean> =
+        withContext(Dispatchers.IO) {
+            try {
+                val payload = JSONObject().apply {
+                    put("delta_bytes", deltaBytes)
+                    put("reset", reset)
+                }
+                val body = encryptedBody(payload).toRequestBody(jsonMediaType)
+                val request = createRequestBuilder("$baseUrl/api/admin/users/$userId/traffic")
+                    .post(body).build()
+
+                client.newCall(request).execute().use { response ->
+                    val json = JSONObject(response.body?.string() ?: "{}")
+                    if (json.optBoolean("success", false)) Result.success(true)
+                    else Result.failure(Exception(json.optString("error", "Traffic update failed")))
+                }
+            } catch (e: Exception) { Result.failure(e) }
+        }
 }

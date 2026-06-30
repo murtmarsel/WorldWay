@@ -23,6 +23,9 @@
     <color name="server_button">#E3F2FD</color>
     <color name="server_button_selected">#BBDEFB</color>
 
+    <!-- Единый цвет иконок меню в шапке (приглушённый сине-серый) -->
+    <color name="menu_icon">#546E7A</color>
+
 
 
 

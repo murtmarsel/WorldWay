@@ -23,12 +23,18 @@
         android:layout_marginTop="12dp"
         android:text="@string/add_config" />
 
-    <ListView
-        android:id="@+id/lvConfigs"
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefreshConfigs"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="8dp"
-        android:paddingHorizontal="8dp" />
+        android:layout_marginTop="8dp">
+
+        <ListView
+            android:id="@+id/lvConfigs"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:paddingHorizontal="8dp" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
 </LinearLayout>

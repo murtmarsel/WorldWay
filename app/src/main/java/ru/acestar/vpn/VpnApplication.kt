@@ -11,6 +11,7 @@ class VpnApplication : ICSOpenVPNApplication() {
     override fun onCreate() {
         super.onCreate()
         ThemePreferences.applyTheme(this)
+        ru.acestar.vpn.update.UpdateNotifier.createChannel(this)
     }
 
     override fun getMainClass(): Class<*> = MainActivity::class.java

@@ -81,7 +81,12 @@
     <string name="favorite">Избранное</string>
     <string name="active_config_label">Текущая конфигурация</string>
     <string name="favorite_limit_reached">Можно добавить не более 10 избранных конфигураций</string>
-    <!-- Auto mode -->
+    <!-- Rename config -->
+    <string name="rename_config_title">Переименовать конфигурацию</string>
+    <string name="rename_config_hint">Введите название (до 10 символов)</string>
+    <string name="rename_config_empty">Название не может быть пустым</string>
+    <string name="config_renamed">Название изменено</string>
+    <string name="configs_synced">Конфигурации синхронизированы</string>
     <string name="auto_trying">Авто: %1$d/%2$d · %3$s</string>
     <string name="auto_all_failed">Не удалось подключиться ни к одному серверу</string>
 
@@ -184,7 +189,7 @@
     <string name="admin_stats">Статистика</string>
     <string name="admin_payments">Платежи</string>
     <string name="admin_logs">Логи</string>
-    <string name="admin_edit">Редактировать</string>
+    <string name="admin_edit">Редактир.</string>
     <string name="admin_reset_password">Сброс пароля</string>
     <string name="admin_subscription">Подписка</string>
     <string name="admin_delete">Удалить</string>
@@ -216,6 +221,30 @@
     <string name="account_stats_sent">Отправлено всего</string>
     <string name="account_stats_sessions">Сессий</string>
 
+    <!-- Account payments history -->
+    <string name="account_payments_history">История платежей</string>
+    <string name="account_payments_empty">Платежей пока нет</string>
+    <string name="payments_col_date">Дата</string>
+    <string name="payments_col_tariff">Тариф</string>
+    <string name="payments_col_amount">Сумма</string>
+    <string name="payments_col_status">Статус</string>
+
+    <!-- App update -->
+    <string name="update_channel_name">Обновления приложения</string>
+    <string name="update_channel_desc">Уведомления о доступных обновлениях</string>
+    <string name="update_available_title">Доступно обновление</string>
+    <string name="update_available_text">Версия %1$s готова к установке</string>
+    <string name="update_now">Обновить</string>
+    <string name="update_later">Позже</string>
+    <string name="update_no_notes">Описание изменений отсутствует</string>
+    <string name="update_downloading">Загрузка обновления…</string>
+    <string name="update_download_failed">Не удалось загрузить обновление</string>
+    <string name="update_allow_install">Разрешите установку из этого источника</string>
+    <string name="update_scheduled">Обновление запланировано</string>
+    <string name="update_schedule_past">Выберите время в будущем</string>
+    <string name="settings_auto_update">Автообновление</string>
+    <string name="settings_auto_update_hint">Автоматически устанавливать новые версии приложения</string>
+
     <!-- Tariffs -->
     <string name="tariff_basic_name">Basic</string>
     <string name="tariff_basic_desc">3 ГБ трафика · месяц или год</string>
@@ -227,7 +256,7 @@
     <string name="tariff_premium_desc">Безлимитный трафик · год</string>
     <string name="tariff_premium_price_year">4 990 ₽</string>
     <string name="tariff_hour_name">Часовой (Hour)</string>
-    <string name="tariff_hour_desc">1 ГБ трафика за просмотр рекламы</string>
+    <string name="tariff_hour_desc">1 ГБ трафика на 1 час за просмотр рекламы</string>
     <string name="tariff_per_month">/ месяц</string>
     <string name="tariff_per_year">/ год</string>
     <string name="tariff_buy_month">Месяц</string>

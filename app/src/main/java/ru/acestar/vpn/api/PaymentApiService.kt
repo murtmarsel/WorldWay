@@ -174,4 +174,53 @@ class PaymentApiService(
             Result.failure(e)
         }
     }
+
+    /**
+     * Получает историю платежей текущего пользователя.
+     * GET /api/v1/payments/history
+     */
+    suspend fun getPaymentHistory(): Result<List<ru.acestar.vpn.data.model.admin.UserPayment>> =
+        withContext(Dispatchers.IO) {
+            try {
+                val token = sessionManager?.getAccessToken()
+                if (token.isNullOrBlank()) {
+                    return@withContext Result.failure(Exception("Нет токена"))
+                }
+                val request = Request.Builder()
+                    .url("$baseUrl/api/v1/payments/history")
+                    .get()
+                    .addHeader("Authorization", "Bearer $token")
+                    .build()
+
+                client.newCall(request).execute().use { response ->
+                    val body = response.body?.string() ?: "{}"
+                    if (!response.isSuccessful)
+                        return@withContext Result.failure(Exception("HTTP ${response.code}"))
+
+                    val json = org.json.JSONObject(body)
+                    if (!json.optBoolean("success", false))
+                        return@withContext Result.failure(Exception(json.optString("error")))
+
+                    val arr = json.optJSONArray("data") ?: org.json.JSONArray()
+                    val list = (0 until arr.length()).map { i ->
+                        val p = arr.getJSONObject(i)
+                        ru.acestar.vpn.data.model.admin.UserPayment(
+                            id          = p.optInt("id"),
+                            amount      = p.optString("amount"),
+                            currency    = p.optString("currency", "RUB"),
+                            status      = p.optString("status"),
+                            created_at  = p.optString("created_at"),
+                            description = p.optString("description").takeIf { it.isNotEmpty() },
+                            tariff      = p.optString("tariff").takeIf { it.isNotEmpty() },
+                            period      = p.optString("period").takeIf { it.isNotEmpty() },
+                            source      = p.optString("source").takeIf { it.isNotEmpty() }
+                        )
+                    }
+                    Result.success(list)
+                }
+            } catch (e: Exception) {
+                Log.e("PaymentApiService", "getPaymentHistory failed", e)
+                Result.failure(e)
+            }
+        }
 }

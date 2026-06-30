@@ -1,4 +1,3 @@
-// viewmodel/AdminViewModel.kt
 package ru.acestar.vpn.viewmodel
 
 import android.app.Application
@@ -8,19 +7,15 @@ import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import ru.acestar.vpn.api.AdminApiService
+import ru.acestar.vpn.data.model.admin.*
 import ru.acestar.vpn.data.repository.SessionManager
-import ru.acestar.vpn.data.model.admin.UpdateUserRequest
-import ru.acestar.vpn.data.model.admin.UserAdminData
-import ru.acestar.vpn.data.model.admin.UserConfigFile
-import ru.acestar.vpn.data.model.admin.UserLog
-import ru.acestar.vpn.data.model.admin.UserPayment
-import ru.acestar.vpn.data.model.admin.UserStats
 
 class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val apiService = AdminApiService(SessionManager.getInstance(application))
 
-    // Состояния
+    // ─── States ──────────────────────────────────────────────────────────────
+
     private val _authState = MutableLiveData<AuthState>(AuthState.Idle)
     val authState: LiveData<AuthState> = _authState
 
@@ -44,6 +39,8 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _operationState = MutableLiveData<OperationState>(OperationState.Idle)
     val operationState: LiveData<OperationState> = _operationState
+
+    // ─── Sealed classes ───────────────────────────────────────────────────────
 
     sealed class AuthState {
         object Idle : AuthState()
@@ -94,153 +91,203 @@ class AdminViewModel(application: Application) : AndroidViewModel(application) {
         data class Error(val message: String) : OperationState()
     }
 
+    // ─── Auth ─────────────────────────────────────────────────────────────────
+
     fun adminLogin(password: String) {
         _authState.value = AuthState.Loading
         viewModelScope.launch {
-            val result = apiService.adminLogin(password)
-            result.onSuccess { token ->
-//                apiService.getToken()
-                _authState.value = AuthState.Success(token)
-                loadUsers()
-            }.onFailure { exception ->
-                _authState.value = AuthState.Error(exception.message ?: "Login failed")
-            }
+            apiService.adminLogin(password)
+                .onSuccess { token ->
+                    _authState.value = AuthState.Success(token)
+                    loadUsers()
+                }
+                .onFailure { _authState.value = AuthState.Error(it.message ?: "Login failed") }
         }
     }
+
+    // ─── Users ────────────────────────────────────────────────────────────────
 
     fun loadUsers() {
         _usersState.value = UsersState.Loading
         viewModelScope.launch {
-            val result = apiService.getUsers()
-            result.onSuccess { users ->
-                _usersState.value = UsersState.Success(users)
-            }.onFailure { exception ->
-                _usersState.value = UsersState.Error(exception.message ?: "Failed to load users")
-            }
+            apiService.getUsers()
+                .onSuccess { _usersState.value = UsersState.Success(it) }
+                .onFailure { _usersState.value = UsersState.Error(it.message ?: "Failed to load users") }
         }
     }
 
-    fun selectUser(user: UserAdminData) {
-        _selectedUser.value = user
-    }
+    fun selectUser(user: UserAdminData) { _selectedUser.value = user }
+
+    // ─── Configs ──────────────────────────────────────────────────────────────
 
     fun loadUserConfigs(userId: Int) {
         _configsState.value = ConfigsState.Loading
         viewModelScope.launch {
-            val result = apiService.getClientFilesList(userId)
-            result.onSuccess { configs ->
-                _configsState.value = ConfigsState.Success(configs)
-            }.onFailure { exception ->
-                _configsState.value = ConfigsState.Error(exception.message ?: "Failed to load configs")
-            }
+            apiService.getClientFilesList(userId)
+                .onSuccess { _configsState.value = ConfigsState.Success(it) }
+                .onFailure { _configsState.value = ConfigsState.Error(it.message ?: "Failed") }
         }
     }
+
+    // ─── Stats ────────────────────────────────────────────────────────────────
 
     fun loadUserStats(userId: Int) {
         _statsState.value = StatsState.Loading
         viewModelScope.launch {
-            val result = apiService.getUserStats(userId)
-            result.onSuccess { stats ->
-                _statsState.value = StatsState.Success(stats)
-            }.onFailure { exception ->
-                _statsState.value = StatsState.Error(exception.message ?: "Failed to load stats")
-            }
+            apiService.getUserStats(userId)
+                .onSuccess { _statsState.value = StatsState.Success(it) }
+                .onFailure { _statsState.value = StatsState.Error(it.message ?: "Failed") }
         }
     }
+
+    /** Тихое обновление — не переводит в Loading, не вызывает мерцания UI */
+    fun silentRefreshStats(userId: Int) {
+        viewModelScope.launch {
+            apiService.getUserStats(userId)
+                .onSuccess { _statsState.value = StatsState.Success(it) }
+                // при ошибке тихого обновления — не меняем состояние
+        }
+    }
+
+    // ─── Payments ─────────────────────────────────────────────────────────────
 
     fun loadUserPayments(userId: Int) {
         _paymentsState.value = PaymentsState.Loading
         viewModelScope.launch {
-            val result = apiService.getUserPayments(userId)
-            result.onSuccess { payments ->
-                _paymentsState.value = PaymentsState.Success(payments)
-            }.onFailure { exception ->
-                _paymentsState.value = PaymentsState.Error(exception.message ?: "Failed to load payments")
-            }
+            apiService.getUserPayments(userId)
+                .onSuccess { _paymentsState.value = PaymentsState.Success(it) }
+                .onFailure { _paymentsState.value = PaymentsState.Error(it.message ?: "Failed") }
         }
     }
+
+    /** Тихое обновление платежей */
+    fun silentRefreshPayments(userId: Int) {
+        viewModelScope.launch {
+            apiService.getUserPayments(userId)
+                .onSuccess { _paymentsState.value = PaymentsState.Success(it) }
+        }
+    }
+
+    // ─── Logs ─────────────────────────────────────────────────────────────────
 
     fun loadUserLogs(userId: Int) {
         _logsState.value = LogsState.Loading
         viewModelScope.launch {
-            val result = apiService.getUserLogs(userId)
-            result.onSuccess { logs ->
-                _logsState.value = LogsState.Success(logs)
-            }.onFailure { exception ->
-                _logsState.value = LogsState.Error(exception.message ?: "Failed to load logs")
-            }
+            apiService.getUserLogs(userId)
+                .onSuccess { _logsState.value = LogsState.Success(it) }
+                .onFailure { _logsState.value = LogsState.Error(it.message ?: "Failed") }
         }
     }
 
-    fun updateUser(userId: Int, email: String? = null, tariff: String? = null, emailConfirmed: Boolean? = null, isActive: Boolean? = null) {
+    /** Тихое обновление логов */
+    fun silentRefreshLogs(userId: Int) {
+        viewModelScope.launch {
+            apiService.getUserLogs(userId)
+                .onSuccess { _logsState.value = LogsState.Success(it) }
+        }
+    }
+
+    // ─── Update user ──────────────────────────────────────────────────────────
+
+    fun updateUser(
+        userId: Int,
+        email: String? = null,
+        tariff: String? = null,
+        emailConfirmed: Boolean? = null,
+        isActive: Boolean? = null,
+        usedTraffic: Long? = null,
+        trafficLimit: Long? = null
+    ) {
         _operationState.value = OperationState.Loading
         viewModelScope.launch {
-            val request = UpdateUserRequest(
+            val req = UpdateUserRequest(
                 email = email,
                 tariff = tariff,
                 email_confirmed = emailConfirmed,
-                is_active = isActive
+                is_active = isActive,
+                used_traffic = usedTraffic,
+                traffic_limit = trafficLimit
             )
-            val result = apiService.updateUser(userId, request)
-            result.onSuccess {
-                _operationState.value = OperationState.Success("User updated successfully")
-                loadUsers()
-                _selectedUser.value?.let { user ->
-                    loadUserStats(user.id)
+            apiService.updateUser(userId, req)
+                .onSuccess {
+                    _operationState.value = OperationState.Success("Пользователь обновлён")
+                    loadUsers()
                 }
-            }.onFailure { exception ->
-                _operationState.value = OperationState.Error(exception.message ?: "Update failed")
-            }
+                .onFailure { _operationState.value = OperationState.Error(it.message ?: "Update failed") }
         }
     }
 
-    fun resetPassword(userId: Int, newPassword: String) {
+    // ─── Reset password ───────────────────────────────────────────────────────
+
+    fun resetPassword(userId: Int, newPassword: String, userEmail: String) {
         _operationState.value = OperationState.Loading
         viewModelScope.launch {
-            val result = apiService.resetPassword(userId, newPassword)
-            result.onSuccess {
-                _operationState.value = OperationState.Success("Password reset successfully")
-            }.onFailure { exception ->
-                _operationState.value = OperationState.Error(exception.message ?: "Reset failed")
-            }
+            apiService.resetPassword(userId, newPassword, userEmail)
+                .onSuccess { _operationState.value = OperationState.Success("Пароль сброшен") }
+                .onFailure { _operationState.value = OperationState.Error(it.message ?: "Reset failed") }
         }
     }
+
+    fun sendPasswordResetEmail(userId: Int, email: String) {
+        _operationState.value = OperationState.Loading
+        viewModelScope.launch {
+            apiService.sendPasswordResetEmail(userId, email)
+                .onSuccess { _operationState.value = OperationState.Success("Письмо отправлено на $email") }
+                .onFailure { _operationState.value = OperationState.Error(it.message ?: "Failed to send email") }
+        }
+    }
+
+    // ─── Delete user ──────────────────────────────────────────────────────────
 
     fun deleteUser(userId: Int) {
         _operationState.value = OperationState.Loading
         viewModelScope.launch {
-            val result = apiService.deleteUser(userId)
-            result.onSuccess {
-                _operationState.value = OperationState.Success("User deleted successfully")
-                loadUsers()
-                _selectedUser.value = null
-            }.onFailure { exception ->
-                _operationState.value = OperationState.Error(exception.message ?: "Delete failed")
-            }
+            apiService.deleteUser(userId)
+                .onSuccess {
+                    _operationState.value = OperationState.Success("Пользователь удалён")
+                    loadUsers()
+                    _selectedUser.value = null
+                }
+                .onFailure { _operationState.value = OperationState.Error(it.message ?: "Delete failed") }
         }
     }
+
+    // ─── Subscription ─────────────────────────────────────────────────────────
 
     fun updateSubscription(userId: Int, action: String, tariff: String? = null) {
         _operationState.value = OperationState.Loading
         viewModelScope.launch {
-            val result = apiService.updateSubscription(userId, action, tariff)
-            result.onSuccess {
-                val message = when (action) {
-                    "pause" -> "Subscription paused"
-                    "resume" -> "Subscription resumed"
-                    "cancel" -> "Subscription cancelled"
-                    else -> "Subscription updated"
+            apiService.updateSubscription(userId, action, tariff)
+                .onSuccess {
+                    val msg = when (action) {
+                        "pause"  -> "Подписка приостановлена"
+                        "resume" -> "Подписка возобновлена"
+                        "cancel" -> "Подписка отменена (Trial)"
+                        else     -> "Подписка обновлена"
+                    }
+                    _operationState.value = OperationState.Success(msg)
+                    loadUsers()
                 }
-                _operationState.value = OperationState.Success(message)
-                loadUsers()
-                _selectedUser.value?.let { user ->
-                    loadUserStats(user.id)
-                }
-            }.onFailure { exception ->
-                _operationState.value = OperationState.Error(exception.message ?: "Update failed")
-            }
+                .onFailure { _operationState.value = OperationState.Error(it.message ?: "Failed") }
         }
     }
+
+    // ─── Traffic ──────────────────────────────────────────────────────────────
+
+    fun updateTraffic(userId: Int, deltaBytes: Long, reset: Boolean = false) {
+        _operationState.value = OperationState.Loading
+        viewModelScope.launch {
+            apiService.updateTraffic(userId, deltaBytes, reset)
+                .onSuccess {
+                    val msg = if (reset) "Трафик сброшен" else "Трафик обновлён"
+                    _operationState.value = OperationState.Success(msg)
+                    loadUsers()
+                }
+                .onFailure { _operationState.value = OperationState.Error(it.message ?: "Failed") }
+        }
+    }
+
+    // ─── Misc ─────────────────────────────────────────────────────────────────
 
     fun resetStates() {
         _operationState.value = OperationState.Idle

@@ -27,11 +27,13 @@ interface SessionDao {
     @Query("""UPDATE current_session
                         SET userId = :userId, email = :email, tariff = :tariff, subsEndDate = :subsEndDate,
                             tokenExpiry = :tokenExpiry, isConfirmed = :isConfirmed, isActive = :isActive,
-                            isAdmin = :isAdmin, isNew = :isNew
+                            isAdmin = :isAdmin, isNew = :isNew,
+                            usedTrafficBytes = :usedTrafficBytes, trafficLimit = :trafficLimit
                         WHERE id = 1 """)
     suspend fun updateCurrentSession(userId: Long, email: String, tariff: String, subsEndDate: Long,
-                                     tokenExpiry: Long, isConfirmed: Boolean, isActive: Boolean, isAdmin: Boolean,
-                                     isNew: Boolean)
+                                     tokenExpiry: Long, isConfirmed: Boolean, isActive: Boolean,
+                                     isAdmin: Boolean, isNew: Boolean,
+                                     usedTrafficBytes: Long, trafficLimit: Long)
 
 //    @PrimaryKey
 //    val id: Int = 1,

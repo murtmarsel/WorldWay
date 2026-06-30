@@ -27,7 +27,7 @@ import ru.acestar.vpn.data.model.CurrentSession
         VpnServerConfigEntity::class,
         Session::class,
         CurrentSession::class],
-    version = 6,
+    version = 8,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -51,6 +51,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** Добавляет trafficLimit в users и current_session */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE users ADD COLUMN trafficLimit INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE current_session ADD COLUMN usedTrafficBytes INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE current_session ADD COLUMN trafficLimit INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /** Добавляет поле autoGroup в vpn_server_configs для поддержки двух авто-режимов */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE vpn_server_configs ADD COLUMN autoGroup TEXT NOT NULL DEFAULT 'auto1'"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -58,7 +76,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "vpn_database"
                 )
-                    .addMigrations(MIGRATION_5_6)
+                    .addMigrations(MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .build()
                 INSTANCE = instance
                 instance

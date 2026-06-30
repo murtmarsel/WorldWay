@@ -36,7 +36,6 @@ data class Session(
 //val username: String? = null
 
 @Entity(tableName = "current_session")
-//@TypeConverters(Converters::class)
 data class CurrentSession(
     @PrimaryKey
     val id: Int = 1,
@@ -50,5 +49,9 @@ data class CurrentSession(
     val isActive: Boolean,
     val isAdmin: Boolean = false,
     val isNew: Boolean = true,
-    val createdAt: Long
+    val createdAt: Long,
+    /** Использованный трафик — синхронизируется с сервером и локальной БД */
+    val usedTrafficBytes: Long = 0L,
+    /** Лимит трафика по тарифу — может меняться независимо от тарифа */
+    val trafficLimit: Long = 0L
 )

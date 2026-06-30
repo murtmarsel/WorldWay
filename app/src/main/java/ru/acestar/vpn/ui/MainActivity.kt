@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var vpnServerConfigDao: VpnServerConfigDao
     private lateinit var authApiService: AuthApiService
     private var isServerConfigs: Boolean = false
+    private var isAutoBlocked: Boolean = false
     private val userRepository by lazy {
         UserRepository((application as VpnApplication).database.userDao())
     }
@@ -87,7 +88,8 @@ class MainActivity : AppCompatActivity() {
                     isServerConfigs    = false
                     VpnSettingsPreferences.saveSelectedConfigId(this@MainActivity, config.id)
                     // Загружаем конфиг, но НЕ подключаемся — пользователь жмёт "Подключиться"
-                    loadConfigUniversal(config.configContent, shortHostLabel(config.serverHost), config.type)
+                    // Имя для уведомления — полное пользовательское название конфига
+                    loadConfigUniversal(config.configContent, config.name, config.type)
                 }
             }
         }
@@ -144,8 +146,8 @@ class MainActivity : AppCompatActivity() {
                     userRepository
                 )
                 if (result.isSuccess) {
-                    // После успешного обновления — явно триггерим обновление ViewModel
-
+                    // После успешного входа — загружаем серверные конфиги в БД
+                    viewModel.syncServerConfigsFromServer()
                 }
             } else {
                 sessionManager.updateCurrentUser(user)
@@ -158,6 +160,9 @@ class MainActivity : AppCompatActivity() {
         isServerConfigs = VpnSettingsPreferences.getIsServerConfig(this)
         emailReminderDismissedForSession = false
         subscriptionReminderDismissedForSession = false
+
+        // Обновляем данные пользователя из локальной БД (быстро, без индикатора).
+        // Конфиги с сервера НЕ запрашиваем — они уже в БД с момента логина.
         viewModel.refreshUser()
 
         if (viewModel.activeProtocol.value == ActiveVpnProtocol.OPENVPN) {
@@ -176,6 +181,71 @@ class MainActivity : AppCompatActivity() {
 
         // Восстанавливаем визуальное состояние кнопок после возврата в активити
         syncButtonStates()
+
+        // Проверка обновлений
+        checkForUpdates()
+    }
+
+    /**
+     * Проверяет обновления через GitHub.
+     * Логика:
+     *  - нет подключения VPN → обновляем сразу (тихо скачиваем и ставим)
+     *  - есть подключение + приложение открыто → BottomSheet с кнопками
+     *  - наступило запланированное время → ставим
+     */
+    private fun checkForUpdates() {
+        // Обработка флага из уведомления "Позже" → сразу открываем выбор времени
+        if (intent?.getBooleanExtra("open_update_schedule", false) == true) {
+            intent.removeExtra("open_update_schedule")
+            val info = ru.acestar.vpn.data.model.UpdateInfo(
+                versionCode = intent.getIntExtra("version_code", 0),
+                versionName = intent.getStringExtra("version_name") ?: "",
+                apkUrl = intent.getStringExtra("apk_url") ?: "",
+                apkSize = intent.getLongExtra("apk_size", 0L),
+                releaseNotes = intent.getStringExtra("notes") ?: ""
+            )
+            if (info.apkUrl.isNotBlank()) {
+                UpdateBottomSheet.newInstance(info).show(supportFragmentManager, "update")
+                return
+            }
+        }
+
+        lifecycleScope.launch {
+            val checker = ru.acestar.vpn.update.UpdateChecker(this@MainActivity)
+            val manager = ru.acestar.vpn.update.UpdateManager(this@MainActivity)
+
+            // Если есть запланированное обновление и время наступило — ставим
+            if (checker.isScheduledTimeReached()) {
+                val info = checker.checkForUpdate()
+                if (info != null) {
+                    checker.clearSchedule()
+                    manager.downloadApk(info).onSuccess { manager.installApk(it) }
+                }
+                return@launch
+            }
+
+            val info = checker.checkForUpdate() ?: return@launch
+
+            // Не показываем повторно отложенную версию (если не наступило время)
+            if (VpnSettingsPreferences.getPostponedVersion(this@MainActivity) == info.versionCode
+                && checker.hasScheduledUpdate()
+            ) return@launch
+
+            val connected = viewModel.connectionState.value == VpnConnectionState.CONNECTED
+
+            if (!connected) {
+                // Нет активного подключения — обновляем сразу
+                if (manager.canInstallPackages()) {
+                    manager.downloadApk(info).onSuccess { manager.installApk(it) }
+                } else {
+                    // Нет разрешения — показываем диалог
+                    UpdateBottomSheet.newInstance(info).show(supportFragmentManager, "update")
+                }
+            } else {
+                // Подключение активно, приложение открыто — показываем BottomSheet
+                UpdateBottomSheet.newInstance(info).show(supportFragmentManager, "update")
+            }
+        }
     }
 
     override fun onPause() {
@@ -186,6 +256,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
+        // SwipeRefreshLayout — потянуть вниз для обновления данных пользователя
+        binding.swipeRefresh.setColorSchemeColors(
+            ContextCompat.getColor(this, R.color.primary),
+            ContextCompat.getColor(this, R.color.connected),
+            ContextCompat.getColor(this, R.color.connecting)
+        )
+        binding.swipeRefresh.setOnRefreshListener {
+            refreshUserData()
+        }
+
         binding.btnAddConfig.setOnClickListener {
             configSelectionLauncher.launch(
                 Intent(this, ConfigSelectionActivity::class.java).apply {
@@ -357,6 +437,8 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             viewModel.currentUser.collectLatest { user ->
+                // Скрываем индикатор если он был показан при автообновлении
+                hideRefreshIndicator()
                 if (user != null) {
                     binding.tvSubscription.visibility = View.VISIBLE
                     val tariff = ru.acestar.vpn.data.model.Tariff.fromId(user.tariff)
@@ -509,6 +591,21 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+        // Блокировка кнопки Авто при исчерпании трафика/срока тарифа
+        lifecycleScope.launch {
+            viewModel.autoBlocked.collectLatest { blocked ->
+                isAutoBlocked = blocked
+                applyAutoButtonBlockState(blocked)
+            }
+        }
+    }
+
+    /** Применяет визуальную блокировку к кнопке Авто */
+    private fun applyAutoButtonBlockState(blocked: Boolean) {
+        val autoButton = findServerButton("auto") ?: return
+        autoButton.isEnabled = !blocked
+        autoButton.alpha = if (blocked) 0.4f else 1f
     }
 
     private fun updateConnectionUI(state: VpnConnectionState) {
@@ -713,7 +810,16 @@ class MainActivity : AppCompatActivity() {
         buttons += createServerButton().apply {
             tag  = "auto"
             text = "Авто"
+            isEnabled = !isAutoBlocked
+            alpha = if (isAutoBlocked) 0.4f else 1f
             setOnClickListener {
+                // Блокировка при исчерпании трафика/срока
+                if (isAutoBlocked) {
+                    showErrorDialog(viewModel.autoBlockReason.value.ifBlank {
+                        getString(R.string.notif_traffic_exhausted_text)
+                    })
+                    return@setOnClickListener
+                }
                 updateAllServerButtonsToDefault()
                 updateServerButtonState("auto", ServerButtonState.ACTIVE)
                 VpnSettingsPreferences.saveIsServerConfig(this@MainActivity, true)
@@ -757,17 +863,10 @@ class MainActivity : AppCompatActivity() {
 
         favoriteConfigs.forEach { favorite ->
             val protocol = extractProtocolLabel(favorite.configContent)
-            val shortHost = shortHostLabel(favorite.serverHost)
             buttons += createServerButton().apply {
                 tag = favorite.id
-                text = "$shortHost $protocol"
-
-
-//                var isActive: Boolean;
-
-//                if (favorite.id == selectedConfigId) isActive = true
-//                else isActive = false
-
+                // Имя кнопки = пользовательское название конфига (переименованное)
+                text = "${favorite.name} $protocol"
 
                 setOnClickListener {
                     updateAllServerButtonsToDefault()
@@ -778,9 +877,8 @@ class MainActivity : AppCompatActivity() {
                     selectedConfigType = favorite.type
                     VpnSettingsPreferences.saveSelectedConfigId(this@MainActivity, favorite.id)
 
-                    // БЫЛО: if (favorite.type == "WireGuard") { loadConfig... } else { loadConfigFromContent... }
-                    // СТАЛО: единый метод
-                    loadConfigUniversal(favorite.configContent, shortHostLabel(favorite.serverHost), favorite.type)
+                    // Имя для уведомления — полное пользовательское название
+                    loadConfigUniversal(favorite.configContent, favorite.name, favorite.type)
 
                     when (currentConnectionState) {
                         VpnConnectionState.CONNECTED,
@@ -821,6 +919,8 @@ class MainActivity : AppCompatActivity() {
 
         // Кнопки пересозданы — восстанавливаем актуальное визуальное состояние
         syncButtonStates()
+        // Восстанавливаем блокировку кнопки Авто
+        applyAutoButtonBlockState(isAutoBlocked)
     }
 
     /**
@@ -864,6 +964,64 @@ class MainActivity : AppCompatActivity() {
 
             // Всё остальное — DEFAULT (уже сброшено выше)
         }
+    }
+
+    /**
+     * Обновляет данные пользователя с сервера.
+     * Вызывается при свайпе вниз или автоматически при изменении данных.
+     * По завершении скрывает индикатор SwipeRefresh.
+     */
+    private fun refreshUserData() {
+        showRefreshIndicatorWithTimeout(timeoutMs = 10_000L) // для ручного свайпа даём 10 сек
+        lifecycleScope.launch {
+            try {
+                val user = sessionManager.getCurrentUser() ?: run {
+                    hideRefreshIndicator()
+                    return@launch
+                }
+                val result = authApiService.getUserData(
+                    user.email,
+                    sessionManager.getAccessToken(),
+                    userRepository
+                )
+                if (result.isSuccess) {
+                    viewModel.refreshUser()
+                } else {
+                    showToast("Не удалось обновить данные")
+                }
+            } catch (e: Exception) {
+                showToast("Ошибка обновления: ${e.message}")
+            } finally {
+                hideRefreshIndicator()
+            }
+        }
+    }
+
+    /**
+     * Показывает индикатор обновления с автоматическим таймаутом.
+     * Гарантированно скрывается через [timeoutMs] даже если данные не пришли.
+     * Повторный вызов сбрасывает таймер.
+     */
+    private var refreshTimeoutJob: kotlinx.coroutines.Job? = null
+    private val REFRESH_TIMEOUT_MS = 3_000L
+
+    private fun showRefreshIndicatorWithTimeout(timeoutMs: Long = REFRESH_TIMEOUT_MS) {
+        binding.swipeRefresh.isRefreshing = true
+        refreshTimeoutJob?.cancel()
+        refreshTimeoutJob = lifecycleScope.launch {
+            delay(timeoutMs)
+            binding.swipeRefresh.isRefreshing = false
+        }
+    }
+
+    private fun showRefreshIndicator() {
+        showRefreshIndicatorWithTimeout()
+    }
+
+    private fun hideRefreshIndicator() {
+        refreshTimeoutJob?.cancel()
+        refreshTimeoutJob = null
+        binding.swipeRefresh.isRefreshing = false
     }
 
     private fun reconnectVpnIfPossible() {

@@ -19,19 +19,34 @@ data class User(
     val isLoggedIn: Boolean = false,
     val username: String? = null,
     /** Суммарный использованный трафик за текущий период тарифа (байты) */
-    val usedTrafficBytes: Long = 0L
+    val usedTrafficBytes: Long = 0L,
+    /**
+     * Лимит трафика — берётся с сервера, может отличаться от дефолтного лимита тарифа.
+     * 0 = использовать дефолт из [Tariff], -1 = безлимит (переопределён администратором).
+     */
+    val trafficLimit: Long = 0L
 ) {
+    /**
+     * Эффективный лимит трафика: если сервер прислал явный лимит — используем его,
+     * иначе берём дефолт из тарифа.
+     */
+    fun effectiveTrafficLimit(): Long? {
+        if (trafficLimit == -1L) return null          // явный безлимит от сервера
+        if (trafficLimit > 0L) return trafficLimit    // явный лимит от сервера
+        return Tariff.fromId(tariff).trafficLimitBytes // дефолт тарифа
+    }
+
     fun hasActiveSubscription(): Boolean {
-        val tariffObj = Tariff.fromId(tariff)
-        // Безлимитный тариф — всегда активен
         if (tariff == "Unlimited") return true
-        // Тариф Hour — активен пока не исчерпан трафик
-        if (tariff == "Hour") return usedTrafficBytes < (tariffObj.trafficLimitBytes ?: Long.MAX_VALUE)
-        // Остальные — проверяем дату окончания
+        if (tariff == "Hour") {
+            val timeOk = subsEndDate?.let { it > System.currentTimeMillis() } ?: false
+            val limit = effectiveTrafficLimit()
+            val trafficOk = limit == null || usedTrafficBytes < limit
+            return timeOk && trafficOk
+        }
         return subsEndDate?.let { it > System.currentTimeMillis() } ?: false
     }
 
-    /** Подписка заканчивается в течение [warnWithinMs] мс. */
     fun subscriptionExpiresWithin(warnWithinMs: Long): Boolean {
         if (tariff == "Unlimited") return false
         return subsEndDate?.let { end ->
@@ -40,22 +55,19 @@ data class User(
         } ?: true
     }
 
-    /** Процент использованного трафика (0..1). null если безлимит. */
     fun trafficUsageRatio(): Float? {
-        val limit = Tariff.fromId(tariff).trafficLimitBytes ?: return null
+        val limit = effectiveTrafficLimit() ?: return null
         if (limit <= 0) return null
         return (usedTrafficBytes.toFloat() / limit).coerceIn(0f, 1f)
     }
 
-    /** Остаток трафика в байтах. null если безлимит. */
     fun remainingTrafficBytes(): Long? {
-        val limit = Tariff.fromId(tariff).trafficLimitBytes ?: return null
+        val limit = effectiveTrafficLimit() ?: return null
         return (limit - usedTrafficBytes).coerceAtLeast(0L)
     }
 
-    /** Трафик исчерпан (для тарифов с лимитом). */
     fun isTrafficExhausted(): Boolean {
-        val limit = Tariff.fromId(tariff).trafficLimitBytes ?: return false
+        val limit = effectiveTrafficLimit() ?: return false
         return usedTrafficBytes >= limit
     }
 }

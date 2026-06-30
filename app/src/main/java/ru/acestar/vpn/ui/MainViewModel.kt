@@ -75,6 +75,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val vpnServerConfigDao = database.vpnServerConfigDao()
     private val userDao            = database.userDao()
     private val sessionManager     = SessionManager.getInstance(application)
+    private val authApiService     = ru.acestar.vpn.api.AuthApiService(sessionManager)
+    private val userRepository     = ru.acestar.vpn.data.repository.UserRepository(userDao)
 
     private var currentUserId = -1L
 
@@ -88,18 +90,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val vpnConfigs: StateFlow<List<VpnConfigEntity>> = _vpnConfigs.asStateFlow()
 
     // ─── Контроль трафика ────────────────────────────────────────────────────
-    /** Трафик исчерпан — нужно отключить VPN */
     private val _trafficExhausted = MutableStateFlow(false)
     val trafficExhausted: StateFlow<Boolean> = _trafficExhausted.asStateFlow()
 
-    /** Флаги уже отправленных уведомлений (сбрасываются при смене тарифа) */
+    /** true = кнопка Авто заблокирована из-за исчерпания трафика или тарифа */
+    private val _autoBlocked = MutableStateFlow(false)
+    val autoBlocked: StateFlow<Boolean> = _autoBlocked.asStateFlow()
+
+    /** Причина блокировки кнопки Авто — показывается пользователю */
+    private val _autoBlockReason = MutableStateFlow("")
+    val autoBlockReason: StateFlow<String> = _autoBlockReason.asStateFlow()
+
     private var notified80Percent = false
     private var notified100Percent = false
     private var notifiedExpiry = false
 
-    /** Байты трафика на момент начала текущей сессии подключения */
     private var sessionStartBytes = 0L
     private var trafficMonitorJob: Job? = null
+    private var periodicSyncJob: Job? = null
 
     // ─── Авто-режим ──────────────────────────────────────────────────────────
     private val _autoModeState = MutableStateFlow<AutoModeState>(AutoModeState.Idle)
@@ -122,12 +130,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         object AllFailed : AutoModeState()
     }
 
+    /** Результат проверки трафика перед запуском авто-режима */
+    sealed class TrafficCheckResult {
+        object Ok : TrafficCheckResult()
+        data class Blocked(val reason: String) : TrafficCheckResult()
+    }
+
     // ─── Init ─────────────────────────────────────────────────────────────────
     init {
         loadCurrentUser()
-        switchProtocolObserver(vpnManager) // слушаем OpenVPN по умолчанию
+        switchProtocolObserver(vpnManager)
         createNotificationChannel()
         observeConnectionForTraffic()
+        startPeriodicSync()
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -173,7 +188,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Перебирает vpn_server_configs. Поле type определяет менеджер.
     // ═══════════════════════════════════════════════════════════════════════
 
-    fun startAutoMode(activity: Activity) {
+    fun startAutoMode(activity: Activity, group: String = "auto1") {
         if (autoActive) return
         stopAutoMode()
 
@@ -182,7 +197,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             autoIndex  = 0
             _autoModeState.value = AutoModeState.Idle
 
-            val configs = vpnServerConfigDao.getAllByOrder(currentUserId)
+            // Убеждаемся что userId известен — без него конфиги не загрузятся
+            if (currentUserId == -1L) {
+                currentUserId = sessionManager.getCurrentUser()?.id ?: -1L
+            }
+            if (currentUserId == -1L) {
+                _autoModeState.value = AutoModeState.AllFailed
+                autoActive = false
+                return@launch
+            }
+
+            // ПРОВЕРКА ДОСТУПА: трафик + срок тарифа (с синхронизацией сервера)
+            val access = checkAccessBeforeAuto()
+            if (access is TrafficCheckResult.Blocked) {
+                _autoModeState.value = AutoModeState.AllFailed
+                autoActive = false
+                return@launch
+            }
+
+            // Если в БД нет конфигов — пробуем подгрузить с сервера
+            if (vpnServerConfigDao.countByUserId(currentUserId) == 0) {
+                ensureServerConfigsLoaded(force = true)
+            }
+
+            // Берём конфиги конкретной группы; если группа пустая — fallback на все конфиги
+            val configs = if (vpnServerConfigDao.countByGroup(currentUserId, group) > 0) {
+                vpnServerConfigDao.getAllByGroup(currentUserId, group)
+            } else {
+                vpnServerConfigDao.getAllByOrder(currentUserId)
+            }
 
             if (configs.isEmpty()) {
                 _autoModeState.value = AutoModeState.AllFailed
@@ -210,24 +253,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     waitForDisconnect(timeoutMs = 8_000)
                 }
 
-                // 2. Переключаем протокол и грузим конфиг
+                // 2. Переключаем протокол и грузим конфиг.
+                // Имя для уведомления: в авто-режиме "Авто O" / "Авто W"
+                val autoLabel = if (config.type.lowercase().let {
+                        it == "wireguard" || it == "amneziawg"
+                    }) "Авто W" else "Авто O"
+
                 val loaded = when (config.type.lowercase()) {
-                    "wireguard" -> {
+                    "wireguard", "amneziawg" -> {
                         setActiveProtocol(ActiveVpnProtocol.WIREGUARD)
-                        wireGuardManager.loadConfig(config.content, "Авто W")
+                        wireGuardManager.loadConfig(config.content, autoLabel)
                     }
                     "openvpn" -> {
                         setActiveProtocol(ActiveVpnProtocol.OPENVPN)
                         vpnManager.loadConfigFromInputStream(
                             ByteArrayInputStream(config.content.toByteArray()),
-                            "Авто O"
+                            autoLabel
                         )
                     }
                     else -> false
                 }
 
                 if (!loaded) {
-                    // Конфиг не распарсился — сразу к следующему
                     autoIndex++
                     continue
                 }
@@ -238,21 +285,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 // 4. Подключаем
                 activeManager().connect(activity)
 
-                // 5. Ждём результата (таймаут 20 сек)
-                val success = waitForConnectionResult(timeoutMs = 20_000)
+                // 5. Ждём результата (таймаут 25 сек — даём больше времени на рукопожатие)
+                val success = waitForConnectionResult(timeoutMs = 25_000)
 
                 if (success) {
-                    _autoModeState.value = AutoModeState.Connected(config)
-                    onConfigLoaded()
-                    autoActive = false
-                    return@launch
+                    // Запас стабильности: убеждаемся что соединение держится 1.5 сек
+                    // (фильтрует ложные CONNECTED которые сразу обрываются → ERR_CONNECTION_CLOSED)
+                    delay(1_500)
+                    if (_connectionState.value == VpnConnectionState.CONNECTED) {
+                        _autoModeState.value = AutoModeState.Connected(config)
+                        onConfigLoaded()
+                        autoActive = false
+                        return@launch
+                    }
+                    // Соединение оборвалось сразу после подключения — следующий
                 }
 
-                // Подключение не удалось — переходим к следующему
                 autoIndex++
             }
 
-            // Все конфиги перебраны без успеха
             if (autoActive) {
                 _autoModeState.value = AutoModeState.AllFailed
                 autoActive = false
@@ -342,6 +393,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun connectActive(activity: Activity) {
         if (_activeProtocol.value == ActiveVpnProtocol.NONE) return
+        // Проверяем доступ перед ручным подключением
+        val user = _currentUser.value
+        if (user != null && !enforceAccessRestrictions(user)) {
+            return // доступ заблокирован — enforceAccessRestrictions уже выставил флаги
+        }
         activeManager().connect(activity)
     }
 
@@ -388,22 +444,129 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshUser() {
         viewModelScope.launch {
-            // Сначала убеждаемся что userId известен
-            if (currentUserId == -1L) {
-                val session = sessionManager.getCurrentUser()
-                currentUserId = session?.id ?: -1L
+            // 1. Восстанавливаем userId из сессии
+            val sessionUser = sessionManager.getCurrentUser()
+            if (sessionUser != null && currentUserId != sessionUser.id) {
+                currentUserId = sessionUser.id
+                observeVpnConfigs()
+            } else if (currentUserId == -1L) {
+                currentUserId = sessionUser?.id ?: -1L
+                if (currentUserId != -1L) observeVpnConfigs()
             }
-            // Читаем из БД — там актуальный usedTrafficBytes
+
+            // 2. Сначала показываем локальные данные (быстро)
             if (currentUserId > 0) {
                 val dbUser = userDao.getUserById(currentUserId)
                 if (dbUser != null) {
                     _currentUser.value = dbUser
                     sessionManager.updateCurrentUser(dbUser)
-                    if (_vpnConfigs.value.isEmpty()) observeVpnConfigs()
-                    return@launch
+                    refreshAutoBlockState(dbUser)
                 }
             }
-            loadCurrentUser()
+
+            // 3. Затем в фоне запрашиваем актуальные данные с сервера
+            // (обновляет токен если нужно, получает свежий тариф/трафик)
+            try {
+                authApiService.refreshOnResume(userRepository)
+                // После серверного обновления читаем свежие данные из БД
+                if (currentUserId > 0) {
+                    val updated = userDao.getUserById(currentUserId)
+                    if (updated != null) {
+                        _currentUser.value = updated
+                        sessionManager.updateCurrentUser(updated)
+                        refreshAutoBlockState(updated)
+                        ensureServerConfigsLoaded()
+                    }
+                }
+            } catch (e: Exception) {
+                // Сеть недоступна — работаем с локальными данными
+                android.util.Log.w("MainViewModel", "refreshUser server sync failed: ${e.message}")
+                ensureServerConfigsLoaded()
+            }
+
+            if (_currentUser.value == null) {
+                loadCurrentUser()
+            }
+        }
+    }
+
+    /**
+     * Обновляет флаг блокировки Авто без отключения VPN.
+     * Используется при обновлении данных пользователя.
+     */
+    private fun refreshAutoBlockState(user: User) {
+        val app = getApplication<Application>()
+        when {
+            user.isTrafficExhausted() -> {
+                _autoBlocked.value = true
+                _autoBlockReason.value = app.getString(R.string.notif_traffic_exhausted_title)
+            }
+            !user.hasActiveSubscription() -> {
+                _autoBlocked.value = true
+                _autoBlockReason.value = app.getString(R.string.subscription_expired)
+            }
+            else -> {
+                _autoBlocked.value = false
+                _autoBlockReason.value = ""
+            }
+        }
+    }
+
+    /**
+     * Проверяет наличие серверных конфигов в БД.
+     * Если таблица пустая — загружает с сервера через AuthApiService.
+     * Вызывается при refreshUser() чтобы авто-режим всегда имел конфиги.
+     *
+     * @param force если true — перезагружает даже если конфиги уже есть
+     */
+    private suspend fun ensureServerConfigsLoaded(force: Boolean = false) {
+        if (currentUserId == -1L) return
+        try {
+            if (!force) {
+                val count = vpnServerConfigDao.countByUserId(currentUserId)
+                if (count > 0) return // конфиги уже есть — ничего не делаем
+            }
+
+            val user = sessionManager.getCurrentUser() ?: return
+            val token = sessionManager.getAccessToken() ?: return
+
+            val result = authApiService.getClientFilesList(user.email, token)
+            result.onSuccess { files ->
+                val entities = files
+                    .filter { !it.content.isNullOrBlank() }
+                    .map { file ->
+                        VpnServerConfigEntity(
+                            userId = currentUserId,
+                            name = file.name,
+                            type = file.type.lowercase(),
+                            category = file.category?.lowercase() ?: "vpn",
+                            protocol = file.protocol?.lowercase() ?: "",
+                            content = file.content!!,
+                            autoGroup = file.group?.lowercase()?.let {
+                                if (it == "auto2") "auto2" else "auto1"
+                            } ?: "auto1"
+                        )
+                    }
+                if (entities.isNotEmpty()) {
+                    // Атомарная замена — старые конфиги удаляются, новые вставляются
+                    vpnServerConfigDao.replaceAllForUser(currentUserId, entities)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainViewModel", "ensureServerConfigsLoaded failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Принудительная синхронизация серверных конфигов (например после логина).
+     * Вызывается из MainActivity при первом запуске.
+     */
+    fun syncServerConfigsFromServer() {
+        viewModelScope.launch {
+            if (currentUserId == -1L) {
+                currentUserId = sessionManager.getCurrentUser()?.id ?: -1L
+            }
+            ensureServerConfigsLoaded(force = true)
         }
     }
 
@@ -422,9 +585,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // VPN CONFIGS (пользовательские — vpn_configs)
     // ═══════════════════════════════════════════════════════════════════════
 
+    private var vpnConfigsObserverJob: Job? = null
+    private var observingForUserId: Long = -1L
+
     private fun observeVpnConfigs() {
         if (currentUserId == -1L) return
-        viewModelScope.launch {
+        // Не перезапускаем если уже наблюдаем за тем же пользователем
+        if (observingForUserId == currentUserId && vpnConfigsObserverJob?.isActive == true) return
+        vpnConfigsObserverJob?.cancel()
+        observingForUserId = currentUserId
+        vpnConfigsObserverJob = viewModelScope.launch {
             vpnConfigDao.observeAllByUser(currentUserId).collectLatest {
                 _vpnConfigs.value = it
             }
@@ -500,24 +670,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val sessionBytes = (currentBytes - sessionStartBytes).coerceAtLeast(0L)
         if (sessionBytes <= 0L) return
 
+        // Сохраняем в БД
         userDao.addUsedTraffic(currentUserId, sessionBytes)
 
-        // Читаем обновлённую запись из БД и обновляем currentUser
-        val updated = userDao.getUserById(currentUserId)
-        if (updated != null) {
-            _currentUser.value = updated
-            sessionManager.updateCurrentUser(updated)
+        // Читаем обновлённую запись из БД — единственный источник правды
+        val updated = userDao.getUserById(currentUserId) ?: return
+        _currentUser.value = updated
+        sessionManager.updateCurrentUser(updated)
+
+        // Для лимитных тарифов — отправляем актуальный трафик на сервер
+        pushTrafficToServerIfLimited(updated)
+
+        // Перепроверяем доступ — мог исчерпаться трафик
+        enforceAccessRestrictions(updated)
+    }
+
+    /**
+     * Отправляет актуальное потребление трафика на сервер.
+     * Только для тарифов с лимитом (безлимитным незачем).
+     */
+    private suspend fun pushTrafficToServerIfLimited(user: User) {
+        val limit = user.effectiveTrafficLimit() ?: return // безлимит — не отправляем
+        if (limit <= 0L) return
+        try {
+            authApiService.syncTrafficToServer(user.usedTrafficBytes, userRepository)
+            // syncTrafficToServer обновляет БД актуальными данными сервера
+            val refreshed = userDao.getUserById(currentUserId)
+            if (refreshed != null) {
+                _currentUser.value = refreshed
+                sessionManager.updateCurrentUser(refreshed)
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("MainViewModel", "pushTraffic failed: ${e.message}")
         }
     }
 
     private fun checkTrafficLimit() {
         val user = _currentUser.value ?: return
-        val tariff = Tariff.fromId(user.tariff)
-        val limit = tariff.trafficLimitBytes ?: return // безлимит — не проверяем
-
+        val limit = user.effectiveTrafficLimit() ?: return // безлимит — не проверяем
         val ratio = user.trafficUsageRatio() ?: return
 
-        // 80% — предупреждение
+        // 80% — предупреждение (один раз)
         if (ratio >= 0.8f && !notified80Percent) {
             notified80Percent = true
             val remaining = Tariff.formatUsed(user.remainingTrafficBytes() ?: 0L)
@@ -530,25 +723,109 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
 
-        // 100% — трафик исчерпан, отключаем VPN
-        if (user.isTrafficExhausted() && !notified100Percent) {
-            notified100Percent = true
-            sendNotification(
-                id = NOTIF_ID_TRAFFIC_100,
-                title = getApplication<Application>().getString(R.string.notif_traffic_exhausted_title),
-                text = getApplication<Application>().getString(R.string.notif_traffic_exhausted_text)
-            )
-            _trafficExhausted.value = true
-            disconnectActive()
+        // 100% — трафик исчерпан → блокировка (проверяется КАЖДЫЙ раз)
+        if (user.isTrafficExhausted()) {
+            // Уведомление — один раз
+            if (!notified100Percent) {
+                notified100Percent = true
+                sendNotification(
+                    id = NOTIF_ID_TRAFFIC_100,
+                    title = getApplication<Application>().getString(R.string.notif_traffic_exhausted_title),
+                    text = getApplication<Application>().getString(R.string.notif_traffic_exhausted_text)
+                )
+            }
+            // Блокировка + отключение — каждый раз пока трафик исчерпан
+            enforceAccessRestrictions(user)
         }
+    }
+
+    /**
+     * Проверяет доступ пользователя (трафик + срок тарифа) и применяет ограничения.
+     * Вызывается при подключении, мониторинге и перед запуском Авто.
+     * Блокирует кнопку Авто и отключает VPN если доступ исчерпан.
+     *
+     * @return true если доступ разрешён, false если заблокирован
+     */
+    private fun enforceAccessRestrictions(user: User): Boolean {
+        val app = getApplication<Application>()
+
+        // Проверка трафика
+        if (user.isTrafficExhausted()) {
+            _autoBlocked.value = true
+            _autoBlockReason.value = app.getString(R.string.notif_traffic_exhausted_title)
+            _trafficExhausted.value = true
+            if (_connectionState.value == VpnConnectionState.CONNECTED ||
+                _connectionState.value == VpnConnectionState.CONNECTING
+            ) {
+                disconnectActive()
+            }
+            return false
+        }
+
+        // Проверка срока действия тарифа
+        if (!user.hasActiveSubscription()) {
+            _autoBlocked.value = true
+            _autoBlockReason.value = app.getString(R.string.subscription_expired)
+            if (_connectionState.value == VpnConnectionState.CONNECTED ||
+                _connectionState.value == VpnConnectionState.CONNECTING
+            ) {
+                disconnectActive()
+            }
+            return false
+        }
+
+        // Доступ есть
+        _autoBlocked.value = false
+        _autoBlockReason.value = ""
+        return true
+    }
+
+    /**
+     * Публичная проверка доступа перед запуском Авто.
+     * Синхронизирует трафик с сервером, проверяет лимит и срок.
+     * @return TrafficCheckResult.Ok если можно запускать, иначе Blocked с причиной
+     */
+    suspend fun checkAccessBeforeAuto(): TrafficCheckResult {
+        if (currentUserId == -1L) {
+            currentUserId = sessionManager.getCurrentUser()?.id ?: -1L
+        }
+        val user = userDao.getUserById(currentUserId)
+            ?: _currentUser.value
+            ?: return TrafficCheckResult.Blocked("Пользователь не найден")
+
+        // Для лимитных тарифов — синхронизируем с сервером перед проверкой
+        val limit = user.effectiveTrafficLimit()
+        if (limit != null && limit > 0L) {
+            pushTrafficToServerIfLimited(user)
+        }
+
+        // Читаем свежие данные после синхронизации
+        val fresh = userDao.getUserById(currentUserId) ?: user
+        _currentUser.value = fresh
+
+        val app = getApplication<Application>()
+        if (fresh.isTrafficExhausted()) {
+            _autoBlocked.value = true
+            _autoBlockReason.value = app.getString(R.string.notif_traffic_exhausted_title)
+            return TrafficCheckResult.Blocked(app.getString(R.string.notif_traffic_exhausted_text))
+        }
+        if (!fresh.hasActiveSubscription()) {
+            _autoBlocked.value = true
+            _autoBlockReason.value = app.getString(R.string.subscription_expired)
+            return TrafficCheckResult.Blocked(app.getString(R.string.subscription_expired))
+        }
+
+        _autoBlocked.value = false
+        _autoBlockReason.value = ""
+        return TrafficCheckResult.Ok
     }
 
     private fun checkSubscriptionExpiry() {
         val user = _currentUser.value ?: return
-        if (notifiedExpiry) return
         if (user.tariff == "Unlimited") return
 
-        if (user.subscriptionExpiresWithin(SUBSCRIPTION_WARN_MS)) {
+        // Уведомление об истечении — один раз
+        if (user.subscriptionExpiresWithin(SUBSCRIPTION_WARN_MS) && !notifiedExpiry) {
             notifiedExpiry = true
             val app = getApplication<Application>()
             sendNotification(
@@ -556,6 +833,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 title = app.getString(R.string.notif_expiry_title),
                 text = app.getString(R.string.notif_expiry_text)
             )
+        }
+
+        // Истёк срок → блокировка (проверяется каждый раз)
+        if (!user.hasActiveSubscription()) {
+            enforceAccessRestrictions(user)
         }
     }
 
@@ -598,5 +880,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         notified100Percent = false
         notifiedExpiry = false
         _trafficExhausted.value = false
+        _autoBlocked.value = false
+        _autoBlockReason.value = ""
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // ПЕРИОДИЧЕСКАЯ СИНХРОНИЗАЦИЯ С СЕРВЕРОМ (каждый час)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    private fun startPeriodicSync() {
+        periodicSyncJob?.cancel()
+        periodicSyncJob = viewModelScope.launch {
+            // Первый запуск — сразу при старте (без задержки)
+            syncUserDataFromServer()
+            // Затем каждый час
+            while (true) {
+                delay(60L * 60L * 1000L)
+                syncUserDataFromServer()
+            }
+        }
+    }
+
+    /**
+     * Запрашивает актуальные данные пользователя с сервера:
+     * тариф, subsEndDate, used_traffic, traffic_limit.
+     * Обновляет БД и _currentUser.
+     */
+    suspend fun syncUserDataFromServer() {
+        val user = sessionManager.getCurrentUser() ?: return
+        val token = sessionManager.getAccessToken() ?: return
+        try {
+            authApiService.getUserData(user.email, token, userRepository)
+            // getUserData уже обновляет БД и сессию — читаем свежие данные
+            val updated = userDao.getUserById(user.id) ?: return
+            _currentUser.value = updated
+            sessionManager.updateCurrentUser(updated)
+        } catch (e: Exception) {
+            // Сеть недоступна — работаем с локальными данными
+        }
     }
 }

@@ -33,5 +33,7 @@ data class AuthData(
     val subsEndDate: Long,
     val isAdmin: Boolean = false,
     val isActive: Boolean = true,
-    val createdAt: Long = -1L
+    val createdAt: Long = -1L,
+    val usedTraffic: Long = 0L,
+    val trafficLimit: Long = 0L
 )

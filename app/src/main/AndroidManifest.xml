@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:name=".VpnApplication"
@@ -118,9 +119,29 @@
 <!--            </intent-filter>-->
         <activity
             android:name=".ui.ConfigSelectionActivity"
-            android:exported="false"
+            android:exported="true"
             android:theme="@style/Theme.VPN.NoActionBar"
-            android:screenOrientation="portrait"/>
+            android:screenOrientation="portrait">
+            <!-- Открытие .ovpn и .conf файлов из сторонних приложений -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="*/*" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.ovpn" />
+                <data android:pathPattern=".*\\..*\\.ovpn" />
+                <data android:pathPattern=".*\\.conf" />
+                <data android:pathPattern=".*\\..*\\.conf" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".ui.PaymentWebViewActivity"
@@ -169,6 +190,11 @@
             android:exported="false"
             tools:node="merge" />
 
+        <!-- Receiver для кнопок уведомления об обновлении -->
+        <receiver
+            android:name=".update.UpdateNotificationReceiver"
+            android:exported="false" />
+
         <!-- Override library FileProvider to avoid conflict with installed OpenVPN app -->
         <provider
             android:name="de.blinkt.openvpn.FileProvider"
@@ -177,6 +203,17 @@
             android:grantUriPermissions="true"
             tools:node="replace"
             android:screenOrientation="portrait"/>
+
+        <!-- FileProvider для установки APK обновлений -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.update.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
 
     </application>
 

@@ -55,7 +55,9 @@ class SessionManager private constructor(
                         isActive = it.isActive,
                         createdAt = it.createdAt,
                         tariff = it.tariff,
-                        emailConfirmed = it.isConfirmed
+                        emailConfirmed = it.isConfirmed,
+                        usedTrafficBytes = it.usedTrafficBytes,
+                        trafficLimit = it.trafficLimit
                     )
                     _currentUser.value = user
                 } ?: run { _currentUser.value = null }
@@ -68,13 +70,15 @@ class SessionManager private constructor(
         }
     }
 
-    suspend fun updateCurrentSession(currentSession: CurrentSession){
-        println("Текущая сессия: ${currentSession.toString()}")
-        sessionDao.updateCurrentSession(currentSession.userId, currentSession.email,
-                                        currentSession.tariff, currentSession.subsEndDate,
-                                        currentSession.tokenExpiry, currentSession.isConfirmed,
-                                        currentSession.isActive, currentSession.isAdmin,
-                                        currentSession.isNew)
+    suspend fun updateCurrentSession(currentSession: CurrentSession) {
+        sessionDao.updateCurrentSession(
+            currentSession.userId, currentSession.email,
+            currentSession.tariff, currentSession.subsEndDate,
+            currentSession.tokenExpiry, currentSession.isConfirmed,
+            currentSession.isActive, currentSession.isAdmin,
+            currentSession.isNew, currentSession.usedTrafficBytes,
+            currentSession.trafficLimit
+        )
     }
 
     suspend fun saveSession(
@@ -87,6 +91,8 @@ class SessionManager private constructor(
         isConfirmed: Boolean,
         isActive: Boolean,
         createdAt: Long,
+        usedTrafficBytes: Long = user.usedTrafficBytes,
+        trafficLimit: Long = user.trafficLimit,
         expiresInSeconds: Long = 30 * 24 * 60 * 60,
     ) {
         val now = System.currentTimeMillis()
@@ -94,41 +100,13 @@ class SessionManager private constructor(
 
         val normalizedToken = token?.takeIf { it.isNotBlank() }
         val tokenToSave = normalizedToken ?: existingCurrent?.token
-
-        // Основной источник срока действия — exp внутри токена (если это JWT)
         val tokenExpiryFromToken = normalizedToken?.let { JwtTokenUtils.extractExpiryMillis(it) }
-
         val tokenExpiryToSave = when {
             tokenToSave.isNullOrBlank() -> 0L
             tokenExpiryFromToken != null -> tokenExpiryFromToken
             normalizedToken != null -> now + (expiresInSeconds * 1000)
             else -> existingCurrent?.tokenExpiry ?: 0L
         }
-
-//        // Вставляем новую строку в `sessions` только если реально получили новый токен
-//        val sessionId: Any = if (normalizedToken != null && !normalizedToken.isBlank()) {
-//            val session = Session(
-//                userId = id,
-//                token = normalizedToken,
-//                tokenExpiry = tokenExpiryToSave,
-//                email = email,
-//                isActive = true
-//            )
-//            sessionDao.insertSession(session)
-//        } else {
-//            // Токен не прислали (сервер сказал "у тебя уже валиден") — переиспользуем старую sessionId
-//            existingCurrent?.id
-//                ?: run {
-//                    val fallbackSession = Session(
-//                        userId = id,
-//                        token = tokenToSave,
-//                        tokenExpiry = tokenExpiryToSave,
-//                        email = email,
-//                        isActive = true
-//                    )
-//                    sessionDao.insertSession(fallbackSession)
-//                }
-//        }
 
         sessionDao.saveCurrentSession(
             CurrentSession(
@@ -142,10 +120,11 @@ class SessionManager private constructor(
                 isActive = isActive,
                 isConfirmed = isConfirmed,
                 subsEndDate = subsEndDate,
-                createdAt = createdAt
+                createdAt = createdAt,
+                usedTrafficBytes = usedTrafficBytes,
+                trafficLimit = trafficLimit
             )
         )
-
         _currentUser.value = user
     }
 
@@ -182,7 +161,9 @@ class SessionManager private constructor(
                 emailConfirmed = it.isConfirmed,
                 isAdmin = it.isAdmin,
                 isNew = it.isNew,
-                isLoggedIn = true
+                isLoggedIn = true,
+                usedTrafficBytes = it.usedTrafficBytes,
+                trafficLimit = it.trafficLimit
             )
         }
     }

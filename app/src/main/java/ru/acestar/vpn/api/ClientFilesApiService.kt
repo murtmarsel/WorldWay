@@ -116,7 +116,9 @@ class ClientFilesApiService(private val sessionManager: SessionManager) {
                                 category = fileJson.optString("category", null),
                                 protocol = fileJson.optString("protocol", null),
                                 config = fileJson.optString("config", null),
-                                content = fileJson.optString("content", null)
+                                content = fileJson.optString("content", null),
+                                group = fileJson.optString("group", null)
+                                    .takeIf { !it.isNullOrBlank() }
                             )
                             filesList.add(file)
                         }

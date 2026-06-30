@@ -10,167 +10,255 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/admin_user_details"
-        android:textSize="20dp"
+        android:textSize="20sp"
         android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="12dp"/>
 
+    <!-- Карточка с данными пользователя -->
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
-        app:cardCornerRadius="8dp"
-        app:cardElevation="1dp">
+        app:cardCornerRadius="10dp"
+        app:cardElevation="2dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:padding="14dp">
 
-            <TextView
-                android:id="@+id/tvUserId"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textSize="14dp"
-                android:textStyle="bold" />
+                android:orientation="horizontal"
+                android:layout_marginBottom="4dp">
+                <TextView
+                    android:id="@+id/tvUserId"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="@color/text_secondary"/>
+                <TextView
+                    android:id="@+id/tvUserStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textStyle="bold"/>
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tvUserEmail"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="16dp"
-                android:layout_marginTop="8dp" />
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"
+                android:layout_marginBottom="4dp"/>
 
-            <TextView
-                android:id="@+id/tvUserTariff"
-                android:layout_width="wrap_content"
+            <LinearLayout
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textSize="14dp"
-                android:layout_marginTop="4dp" />
-
-            <TextView
-                android:id="@+id/tvUserStatus"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="14dp"
-                android:layout_marginTop="4dp" />
-
-            <TextView
-                android:id="@+id/tvUserEmailConfirmed"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:textSize="14dp"
-                android:layout_marginTop="4dp" />
+                android:orientation="horizontal"
+                android:layout_marginBottom="2dp">
+                <TextView
+                    android:id="@+id/tvUserTariff"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:textSize="13sp"
+                    android:textColor="@color/primary"/>
+                <TextView
+                    android:id="@+id/tvUserEmailConfirmed"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"/>
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tvUserCreated"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="12dp"
-                android:textColor="@color/text_secondary"
-                android:layout_marginTop="8dp" />
+                android:textSize="12sp"
+                android:textColor="@color/text_secondary"/>
 
+            <!-- Прогресс-бар трафика (показывается если есть лимит) -->
+            <LinearLayout
+                android:id="@+id/layoutTrafficBar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginTop="8dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="4dp">
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Трафик"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_secondary"/>
+                    <TextView
+                        android:id="@+id/tvTrafficInfo"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="12sp"
+                        android:textColor="@color/text_primary"
+                        android:textStyle="bold"/>
+                </LinearLayout>
+
+                <ProgressBar
+                    android:id="@+id/progressTraffic"
+                    style="@style/Widget.AppCompat.ProgressBar.Horizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="8dp"
+                    android:max="100"
+                    android:progress="0"
+                    android:progressTint="@color/primary"
+                    android:progressBackgroundTint="@color/divider"/>
+            </LinearLayout>
         </LinearLayout>
-
     </com.google.android.material.card.MaterialCardView>
 
+    <!-- Кнопки управления — 2 колонки, одинаковая высота -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:text="@string/admin_actions"
-        android:textSize="16dp"
+        android:textSize="14sp"
         android:textStyle="bold"
-        android:layout_marginBottom="12dp" />
+        android:textColor="@color/text_secondary"
+        android:textAllCaps="true"
+        android:letterSpacing="0.08"
+        android:layout_marginBottom="10dp"/>
 
     <GridLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:columnCount="2"
-        android:rowCount="4"
-        android:alignmentMode="alignMargins"
-        android:columnOrderPreserved="false"
-        android:padding="4dp">
+        android:useDefaultMargins="false">
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewConfigs"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_configs"
-            android:drawableStart="@drawable/ic_file" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_file"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewStats"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_stats"
-            android:drawableStart="@drawable/ic_stats" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_stats"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewPayments"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_payments"
-            android:drawableStart="@drawable/ic_payment" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_payment"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnViewLogs"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_logs"
-            android:drawableStart="@drawable/ic_logs" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_logs"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnEditUser"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_edit"
-            android:drawableStart="@drawable/ic_edit" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_edit"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnResetPassword"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_reset_password"
-            android:drawableStart="@drawable/ic_lock" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_lock"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnManageSubscription"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_subscription"
-            android:drawableStart="@drawable/ic_subscription" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_subscription"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"/>
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnDeleteUser"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="48dp"
             android:layout_columnWeight="1"
             android:layout_margin="4dp"
             android:text="@string/admin_delete"
-            android:drawableStart="@drawable/ic_delete"
-            android:textColor="@color/error" />
+            android:textSize="13sp"
+            android:textAllCaps="false"
+            app:icon="@drawable/ic_delete"
+            app:iconTint="@color/error"
+            app:iconSize="16dp"
+            app:cornerRadius="8dp"
+            app:strokeColor="@color/error"
+            android:textColor="@color/error"/>
 
     </GridLayout>
 

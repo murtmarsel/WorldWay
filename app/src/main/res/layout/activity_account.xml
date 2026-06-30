@@ -13,8 +13,25 @@
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
+            android:background="?attr/colorPrimary"
             app:title="@string/account_title"
-            app:navigationIcon="@drawable/ic_back"/>
+            app:titleTextColor="@color/white"
+            app:navigationIcon="@drawable/ic_back"
+            app:navigationIconTint="@color/white">
+
+            <!-- Иконка обновления в правом углу тулбара -->
+            <ImageView
+                android:id="@+id/ivRefreshAccount"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_gravity="end"
+                android:layout_marginEnd="8dp"
+                android:padding="8dp"
+                android:src="@drawable/ic_refresh"
+                android:tint="@color/white"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Обновить"/>
+        </androidx.appcompat.widget.Toolbar>
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -295,14 +312,16 @@
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 
-            <!-- Карточка: Статистика использования -->
+            <!-- Карточка: Статистика использования — СКРЫТА -->
             <androidx.cardview.widget.CardView
+                android:id="@+id/cardStats"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 app:cardCornerRadius="16dp"
                 app:cardElevation="4dp"
                 app:cardBackgroundColor="@color/card_background"
-                android:layout_marginBottom="16dp">
+                android:layout_marginBottom="16dp"
+                android:visibility="gone">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -387,6 +406,88 @@
                             android:textStyle="bold"
                             android:text="0"/>
                     </LinearLayout>
+                </LinearLayout>
+            </androidx.cardview.widget.CardView>
+
+            <!-- Карточка: История платежей -->
+            <androidx.cardview.widget.CardView
+                android:id="@+id/cardPaymentsHistory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="16dp"
+                app:cardElevation="4dp"
+                app:cardBackgroundColor="@color/card_background"
+                android:layout_marginBottom="16dp">
+
+                <LinearLayout
+                    android:id="@+id/layoutPaymentsHistory"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="20dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/account_payments_history"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:textAllCaps="true"
+                        android:letterSpacing="0.08"
+                        android:layout_marginBottom="10dp"/>
+
+                    <!-- Заголовок таблицы -->
+                    <LinearLayout
+                        android:id="@+id/layoutPaymentsHeader"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingHorizontal="4dp"
+                        android:paddingBottom="6dp">
+                        <TextView
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="2.2" android:text="@string/payments_col_date"
+                            android:textSize="11sp" android:textColor="@color/text_secondary"
+                            android:textAllCaps="true"/>
+                        <TextView
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="2.5" android:text="@string/payments_col_tariff"
+                            android:textSize="11sp" android:textColor="@color/text_secondary"
+                            android:textAllCaps="true"/>
+                        <TextView
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1.8" android:text="@string/payments_col_amount"
+                            android:textSize="11sp" android:textColor="@color/text_secondary"
+                            android:textAllCaps="true" android:gravity="end"/>
+                        <TextView
+                            android:layout_width="0dp" android:layout_height="wrap_content"
+                            android:layout_weight="1.5" android:text="@string/payments_col_status"
+                            android:textSize="11sp" android:textColor="@color/text_secondary"
+                            android:textAllCaps="true" android:gravity="end"/>
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/divider"/>
+
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/rvPaymentsHistory"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:nestedScrollingEnabled="false"/>
+
+                    <!-- Заглушка если платежей нет -->
+                    <TextView
+                        android:id="@+id/tvPaymentsEmpty"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/account_payments_empty"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp"
+                        android:gravity="center"
+                        android:paddingVertical="16dp"
+                        android:visibility="gone"/>
                 </LinearLayout>
             </androidx.cardview.widget.CardView>
 

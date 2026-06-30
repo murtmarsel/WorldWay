@@ -1,9 +1,14 @@
 package ru.acestar.vpn.vpn
 
 import android.app.Activity
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
 import android.net.VpnService
+import android.text.format.Formatter
 import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.wireguard.android.backend.GoBackend
 import com.wireguard.android.backend.Tunnel
 import com.wireguard.config.Config
@@ -11,6 +16,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import ru.acestar.vpn.R
 import java.io.BufferedReader
 import java.io.StringReader
 
@@ -24,6 +30,7 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
     private val backend: GoBackend by lazy { GoBackend(context) }
     private var tunnel: Tunnel? = null
     private var currentConfig: Config? = null
+    private var currentConfigName: String = "WireGuard"
 
     private val runtimePrefs =
         context.getSharedPreferences("wg_runtime_state", Context.MODE_PRIVATE)
@@ -48,8 +55,12 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
     companion object {
         private const val KEY_LAST_STATE  = "last_state"
         private const val KEY_LAST_STATUS = "last_status"
+        private const val KEY_LAST_NAME   = "last_name"
 
         const val VPN_PERMISSION_REQUEST_CODE = 1002
+
+        private const val NOTIF_CHANNEL_ID = "wg_connection"
+        private const val NOTIF_ID = 2001
 
         @Volatile
         private var INSTANCE: WireGuardManager? = null
@@ -58,6 +69,10 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
             INSTANCE ?: synchronized(this) {
                 INSTANCE ?: WireGuardManager(context.applicationContext).also { INSTANCE = it }
             }
+    }
+
+    init {
+        createNotificationChannel()
     }
 
     // ─── TUNNEL ───────────────────────────────────────────────────────────────
@@ -72,12 +87,14 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
                     _connectionState.value = VpnConnectionState.CONNECTED
                     _statusMessage.value   = "Подключено"
                     persistRuntimeState()
+                    showConnectionNotification(0L, 0L)
                 }
                 Tunnel.State.DOWN -> {
                     _connectionState.value = VpnConnectionState.DISCONNECTED
                     _statusMessage.value   = "Отключено"
                     stopMonitoring()
                     persistRuntimeState()
+                    cancelConnectionNotification()
                 }
                 else -> {}
             }
@@ -91,6 +108,7 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
             val patched = ensureDns(configContent)
             val config = Config.parse(BufferedReader(StringReader(patched)))
             currentConfig = config
+            currentConfigName = name
             tunnel        = WgTunnel(name)
             Log.d(TAG, "WireGuard config loaded: $name, DNS servers: ${config.`interface`.dnsServers}")
             true
@@ -164,6 +182,15 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
                     backend.setState(t, Tunnel.State.UP, cfg)
                 }
 
+                // GoBackend.setState не всегда вызывает onStateChange — проверяем явно
+                val realState = withContext(Dispatchers.IO) { backend.getState(t) }
+                if (realState == Tunnel.State.UP) {
+                    _connectionState.value = VpnConnectionState.CONNECTED
+                    _statusMessage.value   = "Подключено"
+                    persistRuntimeState()
+                    showConnectionNotification(0L, 0L)
+                }
+
                 startStateMonitoring()
 
             } catch (e: Exception) {
@@ -171,6 +198,7 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
                 _connectionState.value = VpnConnectionState.ERROR
                 _statusMessage.value   = "Ошибка подключения: ${e.message}"
                 persistRuntimeState()
+                cancelConnectionNotification()
             }
         }
     }
@@ -201,6 +229,7 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
                     _statusMessage.value   = "Отключено"
                     persistRuntimeState()
                 }
+                cancelConnectionNotification()
 
             } catch (e: Exception) {
                 Log.e(TAG, "Disconnect error", e)
@@ -252,8 +281,12 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
                             val stats = withContext(Dispatchers.IO) {
                                 backend.getStatistics(t)
                             }
-                            _byteCountIn.value  = stats.totalRx()
-                            _byteCountOut.value = stats.totalTx()
+                            val rx = stats.totalRx()
+                            val tx = stats.totalTx()
+                            _byteCountIn.value  = rx
+                            _byteCountOut.value = tx
+                            // Обновляем уведомление с актуальным трафиком
+                            showConnectionNotification(rx, tx)
                         } catch (e: Exception) {
                             // getStatistics может бросить если туннель только поднялся
                             Log.w(TAG, "getStatistics failed: ${e.message}")
@@ -331,6 +364,54 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
         runtimePrefs.edit()
             .putString(KEY_LAST_STATE,  _connectionState.value.name)
             .putString(KEY_LAST_STATUS, _statusMessage.value)
+            .putString(KEY_LAST_NAME,   currentConfigName)
             .apply()
+    }
+
+    // ─── УВЕДОМЛЕНИЯ ──────────────────────────────────────────────────────────
+
+    private fun createNotificationChannel() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIF_CHANNEL_ID,
+                "WireGuard подключение",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Статус активного WireGuard подключения"
+                setShowBadge(false)
+            }
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * Показывает/обновляет уведомление о текущем WireGuard-подключении.
+     * Имя конфига [currentConfigName] + текущий трафик (как у OpenVPN).
+     */
+    private fun showConnectionNotification(rxBytes: Long, txBytes: Long) {
+        try {
+            val rx = Formatter.formatShortFileSize(context, rxBytes)
+            val tx = Formatter.formatShortFileSize(context, txBytes)
+            val text = "$currentConfigName · ↓$rx / ↑$tx"
+
+            val notification = NotificationCompat.Builder(context, NOTIF_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_vpn_lock)
+                .setContentTitle("WireGuard подключён")
+                .setContentText(text)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+            NotificationManagerCompat.from(context).notify(NOTIF_ID, notification)
+        } catch (e: SecurityException) {
+            // нет разрешения POST_NOTIFICATIONS — игнорируем
+        }
+    }
+
+    private fun cancelConnectionNotification() {
+        try {
+            NotificationManagerCompat.from(context).cancel(NOTIF_ID)
+        } catch (e: Exception) { /* no-op */ }
     }
 }

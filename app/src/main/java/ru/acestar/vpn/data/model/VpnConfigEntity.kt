@@ -27,5 +27,11 @@ data class VpnServerConfigEntity(
     val category: String,
     val protocol: String,
     val content: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    /**
+     * Группа авто-режима: "auto1" (основной) или "auto2" (резервный).
+     * Сервер возвращает поле "group" в списке конфигов.
+     * По умолчанию "auto1" — обратная совместимость со старыми записями.
+     */
+    val autoGroup: String = "auto1"
 )

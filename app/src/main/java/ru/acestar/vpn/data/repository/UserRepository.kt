@@ -39,9 +39,12 @@ class UserRepository(private val userDao: UserDao) {
     suspend fun getUserById(id: Long): User? {
         return userDao.getUserById(id)
     }
-    suspend fun updateUser(user: User){
-        userDao.updateUser(user.id, user.email, user.emailConfirmed, user.tariff,
-                                user.isNew, user.isActive, user.subsEndDate)
+    suspend fun updateUser(user: User) {
+        userDao.updateUser(
+            user.id, user.email, user.emailConfirmed, user.tariff,
+            user.isNew, user.isActive, user.subsEndDate,
+            user.usedTrafficBytes, user.trafficLimit
+        )
     }
 
     /**
@@ -52,8 +55,6 @@ class UserRepository(private val userDao: UserDao) {
     suspend fun upsertAfterServerAuth(email: String, passwordHash: String, authData: AuthData): User {
         val username = email.substringBefore("@").ifBlank { email }
         val existing = userDao.getUserByEmail(email)
-        val now = System.currentTimeMillis()
-        val sevenDays = now + (7L * 24L * 60L * 60L * 1000L)
         val subscriptionEnd: Long? = authData.subsEndDate
         return if (existing != null) {
             val updated = existing.copy(
@@ -64,7 +65,9 @@ class UserRepository(private val userDao: UserDao) {
                 isNew = authData.isNew,
                 isAdmin = authData.isAdmin,
                 isActive = authData.isActive,
-                subsEndDate = subscriptionEnd
+                subsEndDate = subscriptionEnd,
+                usedTrafficBytes = authData.usedTraffic,
+                trafficLimit = authData.trafficLimit
             )
             userDao.update(updated)
             updated
@@ -78,7 +81,9 @@ class UserRepository(private val userDao: UserDao) {
                 emailConfirmed = authData.isConfirmed,
                 isNew = authData.isNew,
                 isAdmin = authData.isAdmin,
-                isActive = authData.isActive
+                isActive = authData.isActive,
+                usedTrafficBytes = authData.usedTraffic,
+                trafficLimit = authData.trafficLimit
             )
             val id = userDao.insert(newUser)
             userDao.getUserById(id) ?: newUser.copy(id = id)

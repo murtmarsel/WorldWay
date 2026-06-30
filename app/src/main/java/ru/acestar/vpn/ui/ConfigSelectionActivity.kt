@@ -39,6 +39,7 @@ class ConfigSelectionActivity : AppCompatActivity() {
 
     private val configDao      by lazy { (application as VpnApplication).database.vpnConfigDao() }
     private val sessionManager by lazy { SessionManager.getInstance(this) }
+    private val authApiService by lazy { ru.acestar.vpn.api.AuthApiService(sessionManager) }
 
     private var currentUserId = -1L
     private var configs: List<VpnConfigEntity> = emptyList()
@@ -54,7 +55,6 @@ class ConfigSelectionActivity : AppCompatActivity() {
         ThemePreferences.applyTheme(this)
         super.onCreate(savedInstanceState)
 
-        // FIX: binding инициализируем сразу, до корутин
         binding = ActivityConfigSelectionBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
@@ -69,8 +69,22 @@ class ConfigSelectionActivity : AppCompatActivity() {
             }
             observeConfigs()
 
-            if (intent.getBooleanExtra(EXTRA_OPEN_ADD, false)) {
-                binding.root.post { configFilePicker.launch("*/*") }
+            // Обрабатываем входящий файл из стороннего приложения (ACTION_VIEW / ACTION_SEND)
+            when (intent?.action) {
+                Intent.ACTION_VIEW -> {
+                    intent.data?.let { uri -> saveConfigFromUri(uri) }
+                }
+                Intent.ACTION_SEND -> {
+                    @Suppress("DEPRECATION")
+                    val uri = intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)
+                        ?: intent.data
+                    uri?.let { saveConfigFromUri(it) }
+                }
+                else -> {
+                    if (intent.getBooleanExtra(EXTRA_OPEN_ADD, false)) {
+                        binding.root.post { configFilePicker.launch("*/*") }
+                    }
+                }
             }
         }
     }
@@ -81,6 +95,51 @@ class ConfigSelectionActivity : AppCompatActivity() {
         binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.btnAddConfig.setOnClickListener { configFilePicker.launch("*/*") }
+
+        // Свайп вниз — синхронизация конфигов с сервером
+        binding.swipeRefreshConfigs.setOnRefreshListener {
+            syncConfigsWithServer()
+        }
+    }
+
+    /**
+     * Синхронизация конфигов с сервером:
+     * 1. Скачивает полный список серверных конфигов аккаунта
+     * 2. Отправляет на сервер локальные конфиги, которых там нет
+     * Анимация SwipeRefresh крутится пока идёт процесс.
+     */
+    private fun syncConfigsWithServer() {
+        binding.swipeRefreshConfigs.isRefreshing = true
+        lifecycleScope.launch {
+            try {
+                val user = sessionManager.getCurrentUser()
+                if (user == null) {
+                    binding.swipeRefreshConfigs.isRefreshing = false
+                    return@launch
+                }
+                val token = sessionManager.getAccessToken()
+
+                // 1. Получаем серверные конфиги (для отображения актуального списка)
+                authApiService.getClientFilesList(user.email, token)
+
+                // 2. Отправляем локальные manual-конфиги на сервер
+                val snapshot = configDao.getAllByUser(currentUserId)
+                snapshot.filter { it.source == "manual" }.forEach { cfg ->
+                    // При ошибке отправки — игнорируем, ничего не делаем
+                    authApiService.uploadUserConfig(
+                        name = cfg.name,
+                        type = cfg.type,
+                        content = cfg.configContent,
+                        serverHost = cfg.serverHost
+                    )
+                }
+                showToast(R.string.configs_synced)
+            } catch (e: Exception) {
+                // Сеть недоступна — просто прячем индикатор
+            } finally {
+                binding.swipeRefreshConfigs.isRefreshing = false
+            }
+        }
     }
 
     private fun observeConfigs() {
@@ -107,6 +166,41 @@ class ConfigSelectionActivity : AppCompatActivity() {
             )
             finish()
         }
+        // Долгое нажатие — переименование конфигурации
+        binding.lvConfigs.setOnItemLongClickListener { _, _, position, _ ->
+            showRenameDialog(configs[position])
+            true
+        }
+    }
+
+    /**
+     * Диалог переименования конфигурации.
+     * Ограничение: до 10 символов.
+     */
+    private fun showRenameDialog(config: VpnConfigEntity) {
+        val input = com.google.android.material.textfield.TextInputEditText(this).apply {
+            setText(config.name.take(10))
+            filters = arrayOf(android.text.InputFilter.LengthFilter(10))
+            setSelection(text?.length ?: 0)
+            setPadding(48, 32, 48, 32)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.rename_config_title)
+            .setMessage(R.string.rename_config_hint)
+            .setView(input)
+            .setPositiveButton(R.string.save) { _, _ ->
+                val newName = input.text?.toString()?.trim().orEmpty().take(10)
+                if (newName.isNotBlank()) {
+                    lifecycleScope.launch {
+                        configDao.rename(config.id, currentUserId, newName)
+                        showToast(R.string.config_renamed)
+                    }
+                } else {
+                    showToast(R.string.rename_config_empty)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
     }
 
     // ─── СОХРАНЕНИЕ КОНФИГА ───────────────────────────────────────────────────
@@ -157,6 +251,13 @@ class ConfigSelectionActivity : AppCompatActivity() {
                         )
                     )
                     showToast(R.string.config_saved)
+                    // Отправляем на сервер — при ошибке ничего не делаем
+                    authApiService.uploadUserConfig(
+                        name = name,
+                        type = typeString,
+                        content = configText,
+                        serverHost = host
+                    )
                 }
             }
         } catch (e: Exception) {
