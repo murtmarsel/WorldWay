@@ -74,3 +74,16 @@ data class DownloadedFile(
     val file_content: String, // base64 encoded
     var is_imported: Boolean = false
 )
+
+/**
+ * Пользовательский конфиг, загруженный самим пользователем через
+ * POST /api/v1/user/configs/upload. Возвращается эндпоинтом
+ * POST /api/v1/user/configs/list. Это НЕ серверные (авто) конфиги.
+ */
+@Serializable
+data class UserUploadedConfig(
+    val name: String,
+    val type: String,          // OpenVPN | WireGuard
+    val serverHost: String = "",
+    val content: String
+)

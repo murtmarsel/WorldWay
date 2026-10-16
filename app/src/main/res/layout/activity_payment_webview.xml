@@ -14,7 +14,7 @@
         android:background="?attr/colorPrimary"
         app:titleTextColor="@android:color/white"
         app:subtitleTextColor="@android:color/white"
-        app:navigationIcon="@drawable/ic_vpn_lock"/>
+        app:navigationIcon="@drawable/ic_arrow_back_white" app:navigationIconTint="@android:color/white" />
 
     <ProgressBar
         android:id="@+id/progressBar"

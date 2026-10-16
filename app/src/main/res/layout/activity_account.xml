@@ -16,7 +16,7 @@
             android:background="?attr/colorPrimary"
             app:title="@string/account_title"
             app:titleTextColor="@color/white"
-            app:navigationIcon="@drawable/ic_back"
+            app:navigationIcon="@drawable/ic_arrow_back_white"
             app:navigationIconTint="@color/white">
 
             <!-- Иконка обновления в правом углу тулбара -->

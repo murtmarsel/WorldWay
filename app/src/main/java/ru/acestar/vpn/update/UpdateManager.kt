@@ -12,6 +12,11 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.CancellationException
+import android.content.pm.PackageManager
+import java.security.MessageDigest
 import ru.acestar.vpn.data.model.UpdateInfo
 import java.io.File
 
@@ -34,8 +39,10 @@ class UpdateManager(private val context: Context) {
      */
     suspend fun downloadApk(info: UpdateInfo): Result<File> = withContext(Dispatchers.IO) {
         try {
-            val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-            val target = File(dir, APK_FILE_NAME)
+            require(info.apkUrl.startsWith("https://github.com/murtmarsel/WorldWay/releases/download/")) { "Недопустимый адрес обновления" }
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "updates").apply { mkdirs() }
+            val fileName = "update-${info.versionCode}-${System.currentTimeMillis()}.apk"
+            val target = File(dir, fileName)
             if (target.exists()) target.delete()
 
             val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -47,15 +54,23 @@ class UpdateManager(private val context: Context) {
                 )
                 // Качаем во внешний кэш приложения — доступно FileProvider
                 setDestinationInExternalFilesDir(
-                    context, Environment.DIRECTORY_DOWNLOADS, "updates/$APK_FILE_NAME"
+                    context, Environment.DIRECTORY_DOWNLOADS, "updates/$fileName"
                 )
                 setMimeType("application/vnd.android.package-archive")
             }
 
             val downloadId = dm.enqueue(request)
-            val resultFile = awaitDownload(dm, downloadId)
-            if (resultFile != null) Result.success(resultFile)
-            else Result.failure(Exception("Download failed"))
+            try {
+                val resultFile = withTimeout(20 * 60 * 1000L) { awaitDownload(dm, downloadId) }
+                    ?: throw Exception("Download failed")
+                validateApk(resultFile, info.versionCode)
+                Result.success(resultFile)
+            } catch (e: Exception) {
+                dm.remove(downloadId)
+                throw e
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "downloadApk failed", e)
             Result.failure(e)
@@ -80,7 +95,7 @@ class UpdateManager(private val context: Context) {
                         }
                     }
                 }
-                Thread.sleep(500)
+                delay(500)
             }
             @Suppress("UNREACHABLE_CODE") null
         }
@@ -91,6 +106,7 @@ class UpdateManager(private val context: Context) {
      */
     fun installApk(apkFile: File) {
         try {
+            validateApk(apkFile)
             val uri = FileProvider.getUriForFile(context, authority, apkFile)
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")
@@ -100,6 +116,25 @@ class UpdateManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "installApk failed", e)
         }
+    }
+
+    private fun validateApk(file: File, expectedVersion: Int? = null) {
+        val pm = context.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        val candidate = pm.getPackageArchiveInfo(file.absolutePath, flags) ?: error("Повреждённый APK")
+        val installed = pm.getPackageInfo(context.packageName, flags)
+        require(candidate.packageName == context.packageName) { "APK другого приложения" }
+        val code = if (Build.VERSION.SDK_INT >= 28) candidate.longVersionCode else candidate.versionCode.toLong()
+        val current = if (Build.VERSION.SDK_INT >= 28) installed.longVersionCode else installed.versionCode.toLong()
+        require(code > current && (expectedVersion == null || code == expectedVersion.toLong())) { "Номер версии APK не совпал с релизом" }
+        fun fingerprints(info: android.content.pm.PackageInfo): Set<String> {
+            val signatures = if (Build.VERSION.SDK_INT >= 28) info.signingInfo?.apkContentsSigners else info.signatures
+            return signatures.orEmpty().map { signature ->
+                MessageDigest.getInstance("SHA-256").digest(signature.toByteArray()).joinToString("") { "%02x".format(it) }
+            }.toSet()
+        }
+        val signer = fingerprints(installed)
+        require(signer.isNotEmpty() && signer == fingerprints(candidate)) { "Подпись обновления не совпала" }
     }
 
     /**

@@ -16,7 +16,7 @@
             android:background="?attr/colorPrimary"
             app:title="@string/choose_subscription"
             app:titleTextColor="@color/white"
-            app:navigationIcon="@drawable/ic_back"
+            app:navigationIcon="@drawable/ic_arrow_back_white"
             app:navigationIconTint="@color/white"/>
     </com.google.android.material.appbar.AppBarLayout>
 

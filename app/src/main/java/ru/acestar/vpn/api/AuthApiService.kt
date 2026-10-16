@@ -2,6 +2,9 @@ package ru.acestar.vpn.api
 
 import android.util.Log
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.*
@@ -16,6 +19,7 @@ import ru.acestar.vpn.data.model.RegRequest
 import ru.acestar.vpn.data.model.ConfirmEmail
 import ru.acestar.vpn.data.model.CurrentSession
 import ru.acestar.vpn.data.model.User
+import ru.acestar.vpn.data.model.UserUploadedConfig
 import ru.acestar.vpn.data.model.admin.UserConfigFile
 import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.data.repository.UserRepository
@@ -27,6 +31,7 @@ import java.util.Locale
 import java.sql.Date as SqlDate
 
 class AuthApiService(private val sessionManager: SessionManager) {
+    companion object { private val refreshMutex = Mutex() }
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
@@ -42,7 +47,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
     private var pendinLoginDate: Date = Date()
 
     // Базовый URL вашего Flask API
-    private val baseUrl = "http://94.249.239.35:5001"
+    private val baseUrl = "https://usavpn.duckdns.org"
 
     // Токен авторизации
     private var authToken: String? = null
@@ -95,7 +100,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
 //                println("Содержимое data: ${data.toString()}")
 
                 val authData = parseAuthDataFromJson(data, email)
-                getClientFilesList(email, authData.token)
+
 //                println("Данные для получения файлов конф: ${email}, ${authData.token}")
                 Result.success(authData)
 
@@ -106,10 +111,26 @@ class AuthApiService(private val sessionManager: SessionManager) {
         }
     }
 
+    suspend fun emailRequest(path: String, payload: JSONObject): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val builder = Request.Builder().url("$baseUrl/api/v1/$path")
+                .post(payload.toString().toRequestBody(jsonMediaType))
+            sessionManager.getAccessToken()?.let { builder.header("Authorization", "Bearer $it") }
+            client.newCall(builder.build()).execute().use { response ->
+                val json = JSONObject(response.body?.string().orEmpty())
+                if (!response.isSuccessful || !json.optBoolean("success")) {
+                    throw Exception(json.optString("error", "Не удалось выполнить запрос"))
+                }
+                json
+            }
+        }
+    }
+
     suspend fun createUser(
         email: String,
         password: String,
         createDate: Date,
+        verificationToken: String,
     ): Result<AuthData> = withContext(Dispatchers.IO) {
         try {
             val passwordHashed = PasswordHasher.hashForServer(password, email)
@@ -117,7 +138,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
             val RegRequest = RegRequest(
                 email = email,
                 password = passwordHashed,
-                createDate = createDate as SqlDate,
+                createDate = SqlDate(createDate.time),
             )
 
             // Конвертируем в JSON
@@ -125,6 +146,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
                 put("email", RegRequest.email)
                 put("password", RegRequest.password)
                 put("createDate", RegRequest.createDate)
+                put("verificationToken", verificationToken)
             }
 
             // Создаем HTTP запрос
@@ -293,7 +315,6 @@ class AuthApiService(private val sessionManager: SessionManager) {
         withContext(Dispatchers.IO) {
             try {
                 println("Получение файлов конфигурации")
-                println("Текущий токен: ${token}")
                 token?: return@withContext Result.failure(
 
                         Exception("Нет токена для получения конфигурации.")
@@ -392,7 +413,6 @@ class AuthApiService(private val sessionManager: SessionManager) {
                 val accessToken = token ?: return@withContext Result.failure(
                     Exception("Нет токена для получения конфигурации.")
                 )
-                println("Текущий токен: $accessToken")
                 val emailJSON = JSONObject().apply{
                     put("email", email)
                 }
@@ -401,7 +421,6 @@ class AuthApiService(private val sessionManager: SessionManager) {
                 val jsonBody = JSONObject().apply {
                     put("data", encryptedEmail)
                 }
-                println("Передаваемые данные для получения файлов: ${jsonBody}")
 
                 val request = Request.Builder()
                     .url("$baseUrl/api/v1/login/update")
@@ -437,7 +456,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
                     val encrypted = jsonResponse.optBoolean("enc", false)
                     val rawData = jsonResponse.optString("data", null)
 
-                    println(rawData)
+
                     if (rawData == null || rawData === JSONObject.NULL) {
                         return@withContext Result.failure(Exception("Ответ без поля data"))
                     }
@@ -446,28 +465,20 @@ class AuthApiService(private val sessionManager: SessionManager) {
                         // ✅ 1. Расшифровываем данные
                         val decryptedJson = CryptoHelper.decryptData(rawData, token)
 
-                        println("🔓 Decrypted data: $decryptedJson")
-
                         // ✅ 2. Парсим расшифрованный JSON
                         val userData = JSONObject(decryptedJson)
 
-                        val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-
-                        val subsEndDate = userData.optString("subsEndDate")
-                        val date: Date = format.parse(subsEndDate)!!
-                        val subsEndDateTimestamp: Long = date.time
-
-                        val tokenExpiry = userData.optString("tokenExpiry")
-                        val dateToken: Date = format.parse(tokenExpiry)!!
-                        val tokenExpiryTimestamp: Long = dateToken.time
-
-                        val createdAtExpiry = userData.optString("createdAt")
-                        val createdAtToken: Date = format.parse(createdAtExpiry)!!
-                        val createdAtTimestamp: Long = createdAtToken.time
-
-
+                        val cachedUser = sessionManager.getCurrentUser()
+                        val subsEndDateTimestamp = parseServerTime(userData.opt("subsEndDate"))
+                            ?: cachedUser?.subsEndDate ?: 0L
+                        val tokenExpiryTimestamp = ru.acestar.vpn.utils.JwtTokenUtils.extractExpiryMillis(accessToken)
+                            ?: parseServerTime(userData.opt("tokenExpiry"))
+                            ?: sessionManager.currentSession.first()?.tokenExpiry ?: 0L
+                        val createdAtTimestamp = parseServerTime(userData.opt("createdAt"))
+                            ?: cachedUser?.createdAt ?: System.currentTimeMillis()
                         val user = User(
-                            id = userData.optLong("user_id"),
+                            id = cachedUser?.id ?: userData.optLong("user_id"),
+                            createdAt = createdAtTimestamp,
                             email = email,
                             tariff = userData.optString("tariff"),
                             emailConfirmed = userData.optBoolean("isConfirmed"),
@@ -490,26 +501,13 @@ class AuthApiService(private val sessionManager: SessionManager) {
                             tokenExpiry = tokenExpiryTimestamp,
                             createdAt = createdAtTimestamp,
                             isAdmin = user.isAdmin,
+                            isNew = user.isNew,
                             usedTrafficBytes = user.usedTrafficBytes,
                             trafficLimit = user.trafficLimit
                         )
 
                         userRepository.updateUser(user)
                         sessionManager.updateCurrentSession(session)
-                        sessionManager.saveSession(
-                            id = user.id,
-                            user = user,
-                            token = session.token,
-                            email = session.email,
-                            tariff = session.tariff,
-                            subsEndDate = session.subsEndDate,
-                            isConfirmed = session.isConfirmed,
-                            isActive = session.isActive,
-                            createdAt = session.createdAt,
-                            usedTrafficBytes = user.usedTrafficBytes,
-                            trafficLimit = user.trafficLimit
-                        )
-                        sessionManager.updateCurrentUser(user)
                     }
 
                     return@withContext Result.success(true)
@@ -521,6 +519,24 @@ class AuthApiService(private val sessionManager: SessionManager) {
             }
         }
 
+    private fun parseServerTime(value: Any?): Long? {
+        if (value == null || value == JSONObject.NULL) return null
+        val text = value.toString()
+        (if (value is Number) value.toLong() else text.toLongOrNull())?.let {
+            return if (it >= 1_000_000_000_000L) it else it * 1000L
+        }
+        return runCatching { java.time.Instant.parse(text).toEpochMilli() }.getOrNull()
+            ?: runCatching { java.time.OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()
+            ?: runCatching {
+                java.time.LocalDateTime.parse(text.replace(' ', 'T'))
+                    .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            }.getOrNull()
+            ?: runCatching {
+                java.time.LocalDate.parse(text).atStartOfDay(java.time.ZoneId.systemDefault())
+                    .toInstant().toEpochMilli()
+            }.getOrNull()
+    }
+
     private fun parseAuthDataFromJson(data: JSONObject, fallbackEmail: String): AuthData {
         val email = when {
             data.optString("email").isNotBlank() -> data.optString("email")
@@ -530,6 +546,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
             data.has("token") -> data.optString("token", "")
             else -> ""
         }.takeIf { it.isNotBlank() }
+        require(!token.isNullOrBlank()) { "Сервер не вернул токен авторизации" }
         val is_confirmed = when {
             data.optBoolean("isConfirmed") -> data.optBoolean("isConfirmed")
             else -> false
@@ -540,13 +557,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
             else -> false
         }
 
-        val subsEndDate: String  = when {
-            data.has("subsEndDate") && data.optString("subsEndDate").isNotBlank() -> data.optString("subsEndDate")
-            else -> ""
-        }
-        val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val date: Date = format.parse(subsEndDate)!!
-        val subsEndDateTimestamp: Long = date.time
+        val subsEndDateTimestamp = parseServerTime(data.opt("subsEndDate")) ?: 0L
         val is_admin = when {
             data.optBoolean("isAdmin") -> data.optBoolean("isAdmin")
             else -> false
@@ -554,7 +565,9 @@ class AuthApiService(private val sessionManager: SessionManager) {
 
 
         return AuthData(
-            id = data.optLong("id", data.optLong("id", 1)),
+            id = data.optLong("id", data.optLong("user_id", 0L)).also {
+                require(it > 0L) { "Сервер не вернул ID пользователя" }
+            },
             email = email,
             isConfirmed = data.optBoolean("isConfirmed"),
             isNew = data.optBoolean("isNew"),
@@ -562,6 +575,7 @@ class AuthApiService(private val sessionManager: SessionManager) {
             token = token,
             tariff = data.optString("tariff"),
             subsEndDate = subsEndDateTimestamp,
+            createdAt = parseServerTime(data.opt("createdAt")) ?: System.currentTimeMillis(),
             isAdmin = data.optBoolean("isAdmin"),
             usedTraffic = data.optLong("used_traffic", 0L),
             trafficLimit = data.optLong("traffic_limit", 0L)
@@ -579,6 +593,17 @@ class AuthApiService(private val sessionManager: SessionManager) {
      * При успехе обновляет SessionManager без переавторизации.
      * При ошибке — оставляет старый токен, навигация к логину не происходит.
      */
+    suspend fun refreshTokenIfNeeded(): Result<String> = refreshMutex.withLock {
+        val session = sessionManager.currentSession.first()
+            ?: return@withLock Result.failure(Exception("Нет сессии"))
+        val token = session.token?.takeIf { it.isNotBlank() }
+            ?: return@withLock Result.failure(Exception("Нет токена"))
+        if (session.tokenExpiry - System.currentTimeMillis() > 24L * 60 * 60 * 1000) {
+            Result.success(token)
+        } else {
+            refreshToken()
+        }
+    }
     suspend fun refreshToken(): Result<String> = withContext(Dispatchers.IO) {
         try {
             val currentToken = getToken()
@@ -601,18 +626,19 @@ class AuthApiService(private val sessionManager: SessionManager) {
                     )
                 }
 
-                val newToken = json.optString("token", "")
+                val data = json.optJSONObject("data") ?: json
+                val newToken = data.optString("token", "")
                     .takeIf { it.isNotBlank() }
                     ?: return@withContext Result.failure(Exception("Пустой токен в ответе"))
 
                 // Извлекаем новое время истечения из JWT или из ответа
-                val format = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-                val expiryStr = json.optString("tokenExpiry", null)
-                val expiryMs = expiryStr?.let {
-                    runCatching { format.parse(it)?.time }.getOrNull()
-                } ?: (System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000)
+                val expiryMs = ru.acestar.vpn.utils.JwtTokenUtils.extractExpiryMillis(newToken)
+                    ?: parseServerTime(data.opt("tokenExpiry"))
+                    ?: (System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000)
 
-                sessionManager.updateToken(newToken, expiryMs)
+                if (!sessionManager.replaceTokenIfCurrent(currentToken, newToken, expiryMs)) {
+                    return@withContext Result.failure(Exception("Сессия изменилась во время обновления"))
+                }
                 Result.success(newToken)
             }
         } catch (e: Exception) {
@@ -630,22 +656,11 @@ class AuthApiService(private val sessionManager: SessionManager) {
     suspend fun refreshOnResume(userRepository: UserRepository): Result<Boolean> =
         withContext(Dispatchers.IO) {
             try {
+                refreshTokenIfNeeded()
                 val session = sessionManager.getCurrentUser()
                     ?: return@withContext Result.failure(Exception("Не авторизован"))
-
                 val token = sessionManager.getAccessToken()
                     ?: return@withContext Result.failure(Exception("Нет токена"))
-
-                // Проверяем не истекает ли токен в ближайшие сутки
-                val session2 = sessionManager.getCurrentUser()
-                val tokenExpiry = session2?.let {
-                    // SessionManager хранит expiry в CurrentSession
-                    null // получим из DAO ниже
-                }
-
-                // Пробуем обновить токен в фоне (некритично — ошибка игнорируется)
-                refreshToken() // result игнорируем — если не удалось, работаем со старым
-
                 // Получаем актуальный токен (мог обновиться выше)
                 val freshToken = sessionManager.getAccessToken() ?: token
 
@@ -701,6 +716,85 @@ class AuthApiService(private val sessionManager: SessionManager) {
             }
         } catch (e: Exception) {
             Log.w("AuthApiService", "uploadUserConfig failed: ${e.message}")
+            Result.failure(e)
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ПОЛУЧЕНИЕ ПОЛЬЗОВАТЕЛЬСКИХ КОНФИГОВ (загруженных самим пользователем)
+    // POST /api/v1/user/configs/list
+    // Возвращает ТОЛЬКО конфиги, добавленные пользователем через configs/upload,
+    // а не серверные (авто) конфиги из /api/v1/users/configs.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun getUserUploadedConfigs(
+        email: String,
+        token: String?
+    ): Result<List<UserUploadedConfig>> = withContext(Dispatchers.IO) {
+        try {
+            val accessToken = token ?: return@withContext Result.failure(
+                Exception("Нет токена для получения пользовательских конфигов")
+            )
+
+            val payload = JSONObject().apply { put("email", email) }
+            val encrypted = CryptoHelper.encryptData(payload.toString(), accessToken)
+            val jsonBody = JSONObject().apply { put("data", encrypted) }.toString()
+
+            val request = Request.Builder()
+                .url("$baseUrl/api/v1/user/configs/list")
+                .post(jsonBody.toRequestBody(jsonMediaType))
+                .addHeader("Authorization", "Bearer $accessToken")
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "application/json")
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                val responseBody = response.body?.string()
+
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        Exception("HTTP ${response.code}: ${response.message}")
+                    )
+                }
+                if (responseBody.isNullOrEmpty()) {
+                    return@withContext Result.failure(Exception("Empty response"))
+                }
+
+                val jsonResponse = JSONObject(responseBody)
+                if (!jsonResponse.optBoolean("success", false)) {
+                    return@withContext Result.failure(
+                        Exception(jsonResponse.optString("error", "Unknown error"))
+                    )
+                }
+
+                val enc = jsonResponse.optBoolean("enc", false)
+                val rawData = jsonResponse.optString("data", null)
+                if (!enc || rawData.isNullOrEmpty()) {
+                    return@withContext Result.success(emptyList())
+                }
+
+                val decryptedJson = CryptoHelper.decryptData(rawData, accessToken)
+                val data = JSONObject(decryptedJson)
+                val configsArray = data.optJSONArray("configs") ?: JSONArray()
+
+                val configs = mutableListOf<UserUploadedConfig>()
+                for (i in 0 until configsArray.length()) {
+                    val obj = configsArray.getJSONObject(i)
+                    val content = obj.optString("content", "")
+                    if (content.isBlank()) continue
+                    configs.add(
+                        UserUploadedConfig(
+                            name = obj.optString("name", ""),
+                            type = obj.optString("type", ""),
+                            serverHost = obj.optString("server_host", ""),
+                            content = content
+                        )
+                    )
+                }
+                Result.success(configs)
+            }
+        } catch (e: Exception) {
+            Log.w("AuthApiService", "getUserUploadedConfigs failed: ${e.message}")
             Result.failure(e)
         }
     }
@@ -780,10 +874,14 @@ class AuthApiService(private val sessionManager: SessionManager) {
 
                         val currentUser = sessionManager.getCurrentUser()
                         if (currentUser != null) {
+                            // Доверяем большему значению использованного трафика:
+                            // локальному (отправленному) или серверному — что больше.
+                            val serverUsed = userData.optLong("used_traffic", usedBytes)
+                            val finalUsed = maxOf(usedBytes, serverUsed)
                             val updated = currentUser.copy(
                                 tariff = userData.optString("tariff", currentUser.tariff),
                                 subsEndDate = subsEndDate ?: currentUser.subsEndDate,
-                                usedTrafficBytes = userData.optLong("used_traffic", usedBytes),
+                                usedTrafficBytes = finalUsed,
                                 trafficLimit = userData.optLong("traffic_limit", currentUser.trafficLimit),
                                 isActive = userData.optBoolean("isActive", currentUser.isActive)
                             )
@@ -807,3 +905,11 @@ class AuthApiService(private val sessionManager: SessionManager) {
 //private fun JSONObject.optLong(name: String, fallback: String): Long {
 //    return TODO("Предоставить возвращаемое значение")
 //}
+
+
+
+
+
+
+
+

@@ -31,9 +31,7 @@ android {
     defaultConfig {
         applicationId = "ru.acestar.vpn"
         minSdk = 24
-        // OpenVPN dependency crashes on Android 12+ when targetSdk >= 31 because
-        // of missing PendingIntent mutability flags in library internals.
-        // Keep targetSdk 30 until library dependency is updated/fixed.
+
         targetSdk = 33
         versionCode = currentVersionCode
         versionName = currentVersionName
@@ -57,20 +55,31 @@ android {
         }
     }
 
-    //Автоматический запуск задачи перед релизом
-    afterEvaluate {
-        tasks.findByName("assembleRelease")?.dependsOn("incrementVersion")
-        tasks.findByName("bundleRelease")?.dependsOn("incrementVersion")
+    // Release versions are explicit and stable; incrementVersion is a manual helper only.
+    val signingStore = System.getenv("WORLDWAY_KEYSTORE")
+    if (!signingStore.isNullOrBlank()) {
+        signingConfigs.create("worldwayRelease") {
+            storeFile = file(signingStore)
+            storePassword = System.getenv("WORLDWAY_STORE_PASSWORD")
+            keyAlias = System.getenv("WORLDWAY_KEY_ALIAS")
+            keyPassword = System.getenv("WORLDWAY_KEY_PASSWORD")
+        }
     }
 
     buildTypes {
+        debug {
+            if (providers.gradleProperty("worldwayUiPreview").orNull == "true") {
+                applicationIdSuffix = ".uipreview"
+                versionNameSuffix = "-preview"
+            }
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("worldwayRelease") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
@@ -132,8 +141,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines)
     
     // OpenVPN (maintained upstream)
-    implementation("com.github.appstacks0:openvpn:1.0.9")
-//    implementation("com.github.murtmarsel:openvpn:b1f5b0a")
+//    implementation("com.github.appstacks0:openvpn:1.0.9")
+    implementation("com.github.murtmarsel:openvpn:914cb22")
 
     // WireGuard
     implementation("com.wireguard.android:tunnel:1.0.20260102")

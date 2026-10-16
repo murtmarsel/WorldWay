@@ -25,7 +25,7 @@ class UpdateNotificationReceiver : BroadcastReceiver() {
         const val EXTRA_APK_URL = "apk_url"
         const val EXTRA_APK_SIZE = "apk_size"
         const val EXTRA_NOTES = "notes"
-        const val NOTIFICATION_ID = 2001
+        const val NOTIFICATION_ID = 2002
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -67,3 +67,4 @@ class UpdateNotificationReceiver : BroadcastReceiver() {
         }
     }
 }
+

@@ -13,9 +13,7 @@ import java.util.concurrent.TimeUnit
  * Проверка обновлений через GitHub Releases API.
  *
  * Тег релиза должен быть в формате семантической версии "X.Y.Z" (можно с префиксом "v").
- * versionCode извлекается:
- *   - из имени релиза если оно вида "123" или содержит "(123)"
- *   - иначе вычисляется из версии X.Y.Z как X*10000 + Y*100 + Z
+ * versionCode берётся из имени релиза вида "1.0.6 (7)" и сверяется с APK.
  * APK должен быть прикреплён как ассет релиза с расширением .apk
  */
 class UpdateApiService {
@@ -26,7 +24,6 @@ class UpdateApiService {
         .build()
 
     companion object {
-        // TODO: замените на ваш репозиторий
         private const val GITHUB_OWNER = "murtmarsel"
         private const val GITHUB_REPO  = "WorldWay"
         private const val TAG = "UpdateApiService"
@@ -85,7 +82,13 @@ class UpdateApiService {
                     return@withContext Result.failure(Exception("В релизе нет APK-файла"))
                 }
 
-                val versionCode = extractVersionCode(releaseName, tagName)
+                val versionCode = ru.acestar.vpn.update.ReleaseVersion.code(releaseName)
+                if (versionCode <= 0) return@withContext Result.failure(Exception("У релиза не указан versionCode: используйте имя 1.0.6 (7)"))
+                val uri = java.net.URI(apkUrl)
+                if (uri.scheme != "https" || uri.host != "github.com" ||
+                    !uri.path.startsWith("/$GITHUB_OWNER/$GITHUB_REPO/releases/download/")) {
+                    return@withContext Result.failure(Exception("Недопустимый адрес APK"))
+                }
 
                 Result.success(
                     UpdateInfo(
@@ -103,22 +106,4 @@ class UpdateApiService {
         }
     }
 
-    /**
-     * Извлекает versionCode.
-     * Приоритет: число в скобках имени релиза "(123)" → версия X.Y.Z в число.
-     */
-    private fun extractVersionCode(releaseName: String, tag: String): Int {
-        // Формат "1.0.5 (12)" — берём число в скобках
-        val inParens = Regex("""\((\d+)\)""").find(releaseName)?.groupValues?.get(1)
-        if (inParens != null) return inParens.toIntOrNull() ?: 0
-
-        // Иначе вычисляем из X.Y.Z
-        val parts = tag.split(".").mapNotNull { it.toIntOrNull() }
-        return when (parts.size) {
-            3 -> parts[0] * 10000 + parts[1] * 100 + parts[2]
-            2 -> parts[0] * 10000 + parts[1] * 100
-            1 -> parts[0] * 10000
-            else -> 0
-        }
-    }
 }

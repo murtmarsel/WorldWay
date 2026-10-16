@@ -175,6 +175,12 @@ class WireGuardManager(private val context: Context) : VpnManagerInterface {
 
         managerScope.launch {
             try {
+                // Сброс счётчиков трафика — новая сессия начинается с нуля.
+                // Без этого ViewModel возьмёт значения прошлой сессии как базу
+                // и учёт трафика сломается (дельта уйдёт в минус).
+                _byteCountIn.value  = 0L
+                _byteCountOut.value = 0L
+
                 _connectionState.value = VpnConnectionState.CONNECTING
                 _statusMessage.value   = "Подключение..."
 

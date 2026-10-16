@@ -28,6 +28,7 @@
 
         <activity
             android:name=".ui.LoginActivity"
+            android:windowSoftInputMode="adjustResize"
             android:exported="true"
             android:theme="@style/Theme.VPN.NoActionBar"
             android:screenOrientation="portrait">
@@ -66,6 +67,7 @@
 
         <activity
             android:name=".ui.RegisterActivity"
+            android:windowSoftInputMode="adjustResize"
             android:exported="false"
             android:theme="@style/Theme.VPN.NoActionBar"
             android:screenOrientation="portrait"/>
@@ -150,6 +152,20 @@
             android:theme="@style/Theme.VPN.NoActionBar"
             android:screenOrientation="portrait"/>
 
+        <!-- Keep the component used by OpenVPN PendingIntents, execute without a dialog. -->
+        <activity
+            android:name=".ui.VpnNotificationActionActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
+            android:name="de.blinkt.openvpn.activities.DisconnectVPN"
+            tools:node="remove" />
+        <activity-alias
+            android:name="de.blinkt.openvpn.activities.DisconnectVPN"
+            android:targetActivity=".ui.VpnNotificationActionActivity"
+            android:exported="false" />
+
         <!-- Library components: add android:exported required since targetSdk 31+ -->
         <activity
             android:name="de.blinkt.openvpn.LaunchVPN"
@@ -218,3 +234,4 @@
     </application>
 
 </manifest>
+

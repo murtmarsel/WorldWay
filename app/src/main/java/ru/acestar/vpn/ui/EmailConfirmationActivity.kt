@@ -8,6 +8,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.viewModels
 import androidx.lifecycle.Observer
 import ru.acestar.vpn.data.model.EmailConfirmationState
 import ru.acestar.vpn.databinding.ActivityEmailConfirmBinding
@@ -17,7 +18,7 @@ import ru.acestar.vpn.data.model.EmailConfirmationViewModel
 class EmailConfirmationActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityEmailConfirmBinding
-    private val viewModel = EmailConfirmationViewModel()
+    private val viewModel: EmailConfirmationViewModel by viewModels()
 
 //    companion object {
 //        private const val EXTRA_EMAIL = "email"
@@ -55,7 +56,7 @@ class EmailConfirmationActivity : AppCompatActivity() {
         setupTextWatchers()
 
         // Если email передан, сразу показываем поле для кода
-        if (currentEmail.isNotEmpty()) {
+        if (currentEmail.isNotEmpty() && viewModel.emailState.value is EmailConfirmationState.Idle) {
             binding.etEmail.setText(currentEmail)
             viewModel.sendConfirmationCode(currentEmail)
         }
@@ -63,8 +64,9 @@ class EmailConfirmationActivity : AppCompatActivity() {
 
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
-        binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+        binding.toolbar.setNavigationIcon(ru.acestar.vpn.R.drawable.ic_arrow_back_white)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setHomeAsUpIndicator(ru.acestar.vpn.R.drawable.ic_arrow_back_white)
         supportActionBar?.setDisplayShowHomeEnabled(true)
 
         binding.toolbar.setNavigationOnClickListener {
@@ -220,6 +222,7 @@ class EmailConfirmationActivity : AppCompatActivity() {
                 // Возвращаем результат в вызывающую Activity
                 val resultIntent = Intent().apply {
                     putExtra("is_email_confirmed", "true")
+                    putExtra("verification_token", viewModel.verificationToken)
                 }
                 setResult(RESULT_OK, resultIntent)
                 finish()

@@ -47,9 +47,9 @@
     <string name="theme_system">Системная</string>
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Темная</string>
-    <string name="vpn_settings">Настройки VPN</string>
+    <string name="vpn_settings">Подключение</string>
     <string name="vpn_settings_hint">Управление системными параметрами подключения.</string>
-    <string name="open_system_vpn_settings">Cистемные VPN-настройки</string>
+    <string name="open_system_vpn_settings">Системные настройки</string>
     <string name="protocol_settings">Протокол подключения</string>
     <string name="protocol_auto">Авто</string>
     <string name="protocol_udp">UDP</string>

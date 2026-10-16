@@ -76,23 +76,18 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
                         filesResult.fold(
                             onSuccess = { filesList ->
-                                if (filesList.isNotEmpty()) {
-                                    filesList.forEach { file ->
-                                        try {
-                                            val configEntity = VpnServerConfigEntity(
-                                                userId = userId,
-                                                name = file.name,
-                                                type = file.type,
-                                                category = file.category ?: "unknown",
-                                                protocol = file.protocol ?: "auto",
-                                                content = file.content ?: ""
-                                            )
-                                            vpnServerConfigDao.insert(configEntity)
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
-                                        }
-                                    }
+                                val configs = filesList.filter { !it.content.isNullOrBlank() }.map { file ->
+                                    VpnServerConfigEntity(
+                                        userId = authData.id,
+                                        name = file.name,
+                                        type = file.type.lowercase(),
+                                        category = file.category ?: "unknown",
+                                        protocol = file.protocol ?: "auto",
+                                        content = file.content!!,
+                                        autoGroup = if (file.group?.lowercase() == "auto2") "auto2" else "auto1"
+                                    )
                                 }
+                                if (configs.isNotEmpty()) vpnServerConfigDao.replaceAllForUser(authData.id, configs)
                                 _authState.value = AuthState.Success(user)
                             },
                             onFailure = { exception ->
@@ -143,3 +138,5 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun isLoggedIn(): Boolean = sessionManager.isLoggedIn()
 
 }
+
+

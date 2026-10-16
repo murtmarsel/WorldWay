@@ -57,6 +57,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     private var vpnProfile: VpnProfile? = null
     private var mService: IOpenVPNServiceInternal? = null
     private var isBound = false
+    private var disconnectPending = false
 
     companion object {
         private const val TAG = "OpenVpnManager"
@@ -81,7 +82,10 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             mService = IOpenVPNServiceInternal.Stub.asInterface(service)
             Log.d(TAG, "OpenVPN service connected")
-            ensureLoadedStateOnResume()
+            if (disconnectPending) {
+                disconnectPending = false
+                disconnect()
+            } else ensureLoadedStateOnResume()
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
@@ -93,7 +97,6 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     init {
         VpnStatus.addStateListener(this)
         VpnStatus.addByteCountListener(this)
-        restoreRuntimeState()
     }
 
     fun bindService(context: Context) {
@@ -101,8 +104,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         try {
             val intent = Intent(context, OpenVPNService::class.java)
             intent.action = OpenVPNService.START_SERVICE
-            context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
-            isBound = true
+            isBound = this.context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
             ensureLoadedStateOnResume()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to bind service", e)
@@ -110,10 +112,11 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
     }
 
     fun unbindService(context: Context) {
-        if (!isBound) return
+        if (!isBound || disconnectPending) return
         try {
-            context.unbindService(serviceConnection)
+            this.context.unbindService(serviceConnection)
             isBound = false
+            mService = null
         } catch (e: Exception) {
             Log.e(TAG, "Error unbinding service", e)
         }
@@ -211,6 +214,12 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         }
 
         try {
+            // Сброс счётчиков трафика — новая сессия начинается с нуля.
+            // Иначе ViewModel возьмёт остаток прошлой сессии как базу
+            // и учёт трафика сломается (дельта уйдёт в минус).
+            _byteCountIn.value = 0L
+            _byteCountOut.value = 0L
+
             _connectionState.value = VpnConnectionState.CONNECTING
             _statusMessage.value = "Подключение..."
 
@@ -248,9 +257,16 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
                     Log.e(TAG, "Ошибка остановки", e)
                 }
             } else {
-                _connectionState.value = VpnConnectionState.DISCONNECTED
-                _statusMessage.value = "Отключено"
-                persistRuntimeState()
+                // Reopening an Activity can race with the asynchronous service bind.
+                // Keep the disconnect request until the binder becomes available.
+                disconnectPending = true
+                bindService(context)
+                if (!isBound) {
+                    disconnectPending = false
+                    _connectionState.value = VpnConnectionState.ERROR
+                    _statusMessage.value = "Сервис VPN недоступен"
+                    persistRuntimeState()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to disconnect", e)
@@ -393,43 +409,12 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         VpnStatus.removeByteCountListener(this)
     }
 
-    private fun normalizeDisconnectingStateIfNeeded() {
-        if (_connectionState.value == VpnConnectionState.DISCONNECTING && mService == null) {
-            _connectionState.value = VpnConnectionState.DISCONNECTED
-            _statusMessage.value = "Отключено"
-            persistRuntimeState()
-        }
-    }
-
     fun ensureLoadedStateOnResume() {
-        normalizeDisconnectingStateIfNeeded()
-        if (_connectionState.value == VpnConnectionState.DISCONNECTED && mService != null) {
-            val lastState = runtimePrefs.getString(KEY_LAST_STATE, null)
-            if (lastState == VpnConnectionState.CONNECTED.name) {
-                _connectionState.value = VpnConnectionState.CONNECTED
-                _statusMessage.value = "Подключено"
-            }
-        }
+        // Adding a listener replays the library's current state. A bound service
+        // and a saved CONNECTED flag alone do not prove that a tunnel is alive.
+        VpnStatus.removeStateListener(this)
+        VpnStatus.addStateListener(this)
     }
-
-    private fun restoreRuntimeState() {
-        val lastStateName = runtimePrefs.getString(KEY_LAST_STATE, null) ?: return
-        val lastStatus = runtimePrefs.getString(KEY_LAST_STATUS, "") ?: ""
-        val lastTs = runtimePrefs.getLong(KEY_LAST_TS, 0L)
-        val restoredState = runCatching { VpnConnectionState.valueOf(lastStateName) }
-            .getOrDefault(VpnConnectionState.DISCONNECTED)
-        val normalizedState = if (
-            restoredState == VpnConnectionState.DISCONNECTING &&
-            System.currentTimeMillis() - lastTs > 10_000L
-        ) {
-            VpnConnectionState.DISCONNECTED
-        } else {
-            restoredState
-        }
-        _connectionState.value = normalizedState
-        _statusMessage.value = if (normalizedState == VpnConnectionState.DISCONNECTED) "Отключено" else lastStatus
-    }
-
     private fun persistRuntimeState() {
         runtimePrefs.edit()
             .putString(KEY_LAST_STATE, _connectionState.value.name)
@@ -446,3 +431,7 @@ class OpenVpnManager(private val context: Context) : VpnStatus.StateListener, Vp
         persistRuntimeState()
     }
 }
+
+
+
+

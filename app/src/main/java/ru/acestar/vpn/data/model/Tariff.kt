@@ -55,14 +55,20 @@ enum class Tariff(
         fun fromId(id: String): Tariff =
             entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: TRIAL
 
-        /** Форматирует лимит трафика в читаемый вид */
+        /** Форматирует лимит трафика в читаемый вид (с дробной частью, без лишних нулей) */
         fun formatTrafficLimit(bytes: Long?): String {
             if (bytes == null) return "Безлимитно"
             return when {
-                bytes >= 1024L * 1024 * 1024 -> "${bytes / (1024L * 1024 * 1024)} ГБ"
-                bytes >= 1024L * 1024 -> "${bytes / (1024L * 1024)} МБ"
-                else -> "${bytes / 1024} КБ"
+                bytes >= 1024L * 1024 * 1024 -> "${trimDecimal(bytes / (1024.0 * 1024 * 1024))} ГБ"
+                bytes >= 1024L * 1024 -> "${trimDecimal(bytes / (1024.0 * 1024))} МБ"
+                else -> "${trimDecimal(bytes / 1024.0)} КБ"
             }
+        }
+
+        /** Форматирует число с 2 знаками после запятой, убирая хвостовые нули: 10.00→10, 3.50→3.5 */
+        private fun trimDecimal(value: Double): String {
+            val s = String.format(java.util.Locale.US, "%.2f", value)
+            return s.trimEnd('0').trimEnd('.')
         }
 
         /** Форматирует использованный трафик */

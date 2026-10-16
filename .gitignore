@@ -8,8 +8,22 @@
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
 .DS_Store
-/build
 /captures
 .externalNativeBuild
 .cxx
 local.properties
+
+/server-audit/private/
+
+/build/
+/app/build/
+/.idea/
+/certificate key/
+/review-recovery/
+*.keystore
+*.jks
+*.apk
+*.log
+*.zip
+hs_err_pid*
+replay_pid*

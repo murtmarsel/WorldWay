@@ -1,0 +1,16 @@
+<resources>
+    <style name="ThemeOverlay.VPN.RecoverySheet" parent="ThemeOverlay.MaterialComponents.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/Widget.VPN.RecoverySheet</item>
+    </style>
+    <style name="Widget.VPN.RecoverySheet" parent="Widget.MaterialComponents.BottomSheet.Modal">
+        <item name="shapeAppearanceOverlay">@style/ShapeAppearanceOverlay.VPN.RecoverySheet</item>
+        <item name="backgroundTint">@color/card_background</item>
+    </style>
+    <style name="ShapeAppearanceOverlay.VPN.RecoverySheet" parent="">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSizeTopLeft">28dp</item>
+        <item name="cornerSizeTopRight">28dp</item>
+        <item name="cornerSizeBottomLeft">0dp</item>
+        <item name="cornerSizeBottomRight">0dp</item>
+    </style>
+</resources>

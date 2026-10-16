@@ -41,6 +41,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         private const val NOTIF_ID_TRAFFIC_80  = 1001
         private const val NOTIF_ID_TRAFFIC_100 = 1002
         private const val NOTIF_ID_EXPIRY      = 1003
+
+        /** Интервал отправки трафика на сервер при активном лимитном подключении — 5 минут */
+        private const val TRAFFIC_SERVER_PUSH_INTERVAL_MS = 5L * 60L * 1000L
     }
 
     // ─── Менеджеры ───────────────────────────────────────────────────────────
@@ -105,7 +108,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var notified100Percent = false
     private var notifiedExpiry = false
 
-    private var sessionStartBytes = 0L
+    /**
+     * Последнее «сырое» показание счётчика сессии (in+out), которое мы уже учли.
+     * Дельта-учёт с детекцией сброса: если текущее показание меньше этого —
+     * счётчик обнулился (началась новая сессия), значит весь текущий объём —
+     * это прирост. Такой подход устойчив к гонкам обновления проксированных
+     * потоков байт и к тому, сбрасывает ли менеджер счётчики.
+     */
+    private var lastRawSessionBytes = 0L
     private var trafficMonitorJob: Job? = null
     private var periodicSyncJob: Job? = null
 
@@ -139,7 +149,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ─── Init ─────────────────────────────────────────────────────────────────
     init {
         loadCurrentUser()
-        switchProtocolObserver(vpnManager)
+        if (wireGuardManager.isConnected()) setActiveProtocol(ActiveVpnProtocol.WIREGUARD)
+        else setActiveProtocol(ActiveVpnProtocol.OPENVPN)
+        viewModelScope.launch {
+            wireGuardManager.connectionState.collectLatest {
+                if (it == VpnConnectionState.CONNECTED) setActiveProtocol(ActiveVpnProtocol.WIREGUARD)
+            }
+        }
+        viewModelScope.launch {
+            vpnManager.connectionState.collectLatest {
+                if (it == VpnConnectionState.CONNECTED) setActiveProtocol(ActiveVpnProtocol.OPENVPN)
+            }
+        }
         createNotificationChannel()
         observeConnectionForTraffic()
         startPeriodicSync()
@@ -169,7 +190,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         protocolObserverJob?.cancel()
         protocolObserverJob = viewModelScope.launch {
             val jobs = listOf(
-                launch { manager.connectionState.collectLatest { _connectionState.value = it } },
+                launch { manager.connectionState.collectLatest {
+                    _connectionState.value = it
+                    if (it == VpnConnectionState.CONNECTED) _configLoaded.value = true
+                } },
                 launch { manager.statusMessage.collectLatest   { _statusMessage.value  = it } },
                 launch { manager.byteCountIn.collectLatest     { _byteCountIn.value    = it } },
                 launch { manager.byteCountOut.collectLatest    { _byteCountOut.value   = it } },
@@ -421,6 +445,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * Вызывается при onResume: если VPN уже подключён (состояние восстановлено из менеджера),
      * помечаем configLoaded = true чтобы кнопка "Подключиться" была активна.
      */
+    fun restoreVpnState(activity: Activity) {
+        vpnManager.bindService(activity)
+        vpnManager.ensureLoadedStateOnResume()
+        wireGuardManager.ensureLoadedStateOnResume()
+        when {
+            wireGuardManager.isConnected() -> setActiveProtocol(ActiveVpnProtocol.WIREGUARD)
+            vpnManager.isConnected() -> setActiveProtocol(ActiveVpnProtocol.OPENVPN)
+        }
+        restoreConfigLoadedIfConnected()
+    }
+
     fun restoreConfigLoadedIfConnected() {
         if (_connectionState.value == VpnConnectionState.CONNECTED) {
             _configLoaded.value = true
@@ -468,6 +503,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // (обновляет токен если нужно, получает свежий тариф/трафик)
             try {
                 authApiService.refreshOnResume(userRepository)
+                sessionManager.getCurrentUser()?.let { refreshedUser ->
+                    if (currentUserId != refreshedUser.id) {
+                        currentUserId = refreshedUser.id
+                        observeVpnConfigs()
+                    }
+                }
                 // После серверного обновления читаем свежие данные из БД
                 if (currentUserId > 0) {
                     val updated = userDao.getUserById(currentUserId)
@@ -634,13 +675,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _connectionState.collectLatest { state ->
                 when (state) {
                     VpnConnectionState.CONNECTED -> {
-                        sessionStartBytes = _byteCountIn.value + _byteCountOut.value
+                        // База учёта НЕ берётся из проксированного _byteCountIn —
+                        // оно может запаздывать (гонка потоков) и содержать значение
+                        // прошлой сессии. Дельту с детекцией сброса считает
+                        // accountSessionTrafficDelta(), поэтому базу не трогаем.
                         startTrafficMonitor()
                     }
                     VpnConnectionState.DISCONNECTED,
                     VpnConnectionState.ERROR -> {
                         stopTrafficMonitor()
-                        saveSessionTraffic()
+                        // Запускаем в отдельной корутине viewModelScope, чтобы
+                        // collectLatest не отменил сохранение при быстром переподключении.
+                        viewModelScope.launch { saveSessionTraffic() }
                     }
                     else -> {}
                 }
@@ -651,10 +697,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun startTrafficMonitor() {
         trafficMonitorJob?.cancel()
         trafficMonitorJob = viewModelScope.launch {
+            var msSinceServerPush = 0L
             while (true) {
                 delay(5_000) // проверяем каждые 5 секунд
+                // Копим потреблённый в сессии трафик в локальную БД (дельта с прошлого учёта)
+                accountSessionTrafficDelta()
                 checkTrafficLimit()
                 checkSubscriptionExpiry()
+
+                // Раз в 5 минут при лимитном тарифе — отправляем актуальный трафик на сервер
+                msSinceServerPush += 5_000
+                if (msSinceServerPush >= TRAFFIC_SERVER_PUSH_INTERVAL_MS) {
+                    msSinceServerPush = 0L
+                    val u = userDao.getUserById(currentUserId)
+                    if (u != null) pushTrafficToServerIfLimited(u)
+                }
             }
         }
     }
@@ -664,37 +721,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         trafficMonitorJob = null
     }
 
+    /**
+     * Учитывает потреблённый в текущей сессии трафик в локальной БД.
+     *
+     * Считает прирост (дельту) относительно последнего учтённого показания с
+     * ДЕТЕКЦИЕЙ СБРОСА: если текущее показание счётчика меньше предыдущего,
+     * значит счётчик обнулился (новая сессия) — тогда прирост это всё текущее
+     * значение. Такой алгоритм не задваивает трафик, не уходит в минус и не
+     * зависит от гонок обновления проксированных потоков байт.
+     *
+     * Обновляет _currentUser и сессию.
+     * @return актуальный пользователь из БД (или null если userId неизвестен)
+     */
+    private suspend fun accountSessionTrafficDelta(): User? {
+        if (currentUserId == -1L) return null
+        val currentSessionBytes = _byteCountIn.value + _byteCountOut.value
+        val delta = if (currentSessionBytes >= lastRawSessionBytes) {
+            currentSessionBytes - lastRawSessionBytes
+        } else {
+            // Счётчик сброшен → весь текущий объём является приростом
+            currentSessionBytes
+        }
+        lastRawSessionBytes = currentSessionBytes
+        if (delta > 0L) {
+            userDao.addUsedTraffic(currentUserId, delta)
+        }
+        val updated = userDao.getUserById(currentUserId)
+        if (updated != null) {
+            _currentUser.value = updated
+            sessionManager.updateCurrentUser(updated)
+        }
+        return updated
+    }
+
     private suspend fun saveSessionTraffic() {
         if (currentUserId == -1L) return
-        val currentBytes = _byteCountIn.value + _byteCountOut.value
-        val sessionBytes = (currentBytes - sessionStartBytes).coerceAtLeast(0L)
-        if (sessionBytes <= 0L) return
 
-        // Сохраняем в БД
-        userDao.addUsedTraffic(currentUserId, sessionBytes)
-
-        // Читаем обновлённую запись из БД — единственный источник правды
-        val updated = userDao.getUserById(currentUserId) ?: return
-        _currentUser.value = updated
-        sessionManager.updateCurrentUser(updated)
+        // Досчитываем оставшийся трафик сессии в локальную БД (параллельно с отправкой)
+        val updated = accountSessionTrafficDelta() ?: return
 
         // Для лимитных тарифов — отправляем актуальный трафик на сервер
         pushTrafficToServerIfLimited(updated)
 
         // Перепроверяем доступ — мог исчерпаться трафик
-        enforceAccessRestrictions(updated)
+        val fresh = userDao.getUserById(currentUserId) ?: updated
+        enforceAccessRestrictions(fresh)
     }
 
     /**
      * Отправляет актуальное потребление трафика на сервер.
      * Только для тарифов с лимитом (безлимитным незачем).
+     * Сервер и клиент сверяют значения — используется большее (источник правды).
      */
     private suspend fun pushTrafficToServerIfLimited(user: User) {
         val limit = user.effectiveTrafficLimit() ?: return // безлимит — не отправляем
         if (limit <= 0L) return
         try {
-            authApiService.syncTrafficToServer(user.usedTrafficBytes, userRepository)
-            // syncTrafficToServer обновляет БД актуальными данными сервера
+            // Берём самое свежее локальное значение из БД
+            val localUsed = userDao.getUsedTraffic(currentUserId) ?: user.usedTrafficBytes
+            authApiService.syncTrafficToServer(localUsed, userRepository)
+            // syncTrafficToServer сохраняет в БД максимум из локального и серверного
             val refreshed = userDao.getUserById(currentUserId)
             if (refreshed != null) {
                 _currentUser.value = refreshed
@@ -920,3 +1006,4 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 }
+

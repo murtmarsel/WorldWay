@@ -126,6 +126,7 @@ class MainActivity : AppCompatActivity() {
 
         // ← Потом запускаем корутину с авторизацией
         lifecycleScope.launch {
+            authApiService.refreshTokenIfNeeded()
             val isLoggedIn = sessionManager.isLoggedIn()
             if (!isLoggedIn) {
                 navigateToLogin()
@@ -165,13 +166,7 @@ class MainActivity : AppCompatActivity() {
         // Конфиги с сервера НЕ запрашиваем — они уже в БД с момента логина.
         viewModel.refreshUser()
 
-        if (viewModel.activeProtocol.value == ActiveVpnProtocol.OPENVPN) {
-            viewModel.vpnManager.bindService(this)
-            viewModel.vpnManager.ensureLoadedStateOnResume()
-        }
-        if (viewModel.activeProtocol.value == ActiveVpnProtocol.WIREGUARD) {
-            viewModel.wireGuardManager.ensureLoadedStateOnResume()
-        }
+        viewModel.restoreVpnState(this)
         // Если VPN подключён — убеждаемся что кнопка "Подключиться" активна
         viewModel.restoreConfigLoadedIfConnected()
 
@@ -249,9 +244,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onPause() {
-        if (viewModel.activeProtocol.value == ActiveVpnProtocol.OPENVPN) {
-            viewModel.vpnManager.unbindService(this)
-        }
+        viewModel.vpnManager.unbindService(this)
         super.onPause()
     }
 
@@ -444,12 +437,16 @@ class MainActivity : AppCompatActivity() {
                     val tariff = ru.acestar.vpn.data.model.Tariff.fromId(user.tariff)
                     if (user.hasActiveSubscription()) {
                         val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale.getDefault())
+                        // Лимит трафика берём с сервера (effectiveTrafficLimit):
+                        // если сервер прислал явный лимит — используется он,
+                        // если нет — дефолтный лимит тарифа. null = безлимит.
+                        val effectiveLimit = user.effectiveTrafficLimit()
                         val text = when {
                             user.tariff == "Unlimited" ->
                                 "${tariff.displayName} · ${getString(R.string.subscription_active_unlimited)}"
-                            tariff.trafficLimitBytes != null -> {
+                            effectiveLimit != null -> {
                                 val used = ru.acestar.vpn.data.model.Tariff.formatUsed(user.usedTrafficBytes)
-                                val limit = ru.acestar.vpn.data.model.Tariff.formatTrafficLimit(tariff.trafficLimitBytes)
+                                val limit = ru.acestar.vpn.data.model.Tariff.formatTrafficLimit(effectiveLimit)
                                 "${tariff.displayName} · $used / $limit"
                             }
                             user.subsEndDate != null && user.subsEndDate > 0 ->
@@ -862,11 +859,10 @@ class MainActivity : AppCompatActivity() {
             .take(10)
 
         favoriteConfigs.forEach { favorite ->
-            val protocol = extractProtocolLabel(favorite.configContent)
             buttons += createServerButton().apply {
                 tag = favorite.id
-                // Имя кнопки = пользовательское название конфига (переименованное)
-                text = "${favorite.name} $protocol"
+                // Короткая подпись на главном экране; полное имя конфига сохраняется.
+                text = ru.acestar.vpn.utils.FavoriteConfigLabel.format(favorite.serverHost, favorite.configContent)
 
                 setOnClickListener {
                     updateAllServerButtonsToDefault()
@@ -1336,3 +1332,4 @@ class MainActivity : AppCompatActivity() {
         finish()
     }
 }
+

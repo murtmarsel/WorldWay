@@ -17,7 +17,7 @@
             android:layout_height="?attr/actionBarSize"
             app:title="@string/admin_panel"
             app:navigationIcon="@drawable/ic_arrow_back_white"
-            app:titleTextColor="@android:color/white" />
+            app:titleTextColor="@android:color/white" app:navigationIconTint="@android:color/white" />
     </com.google.android.material.appbar.AppBarLayout>
 
     <androidx.core.widget.NestedScrollView
@@ -74,6 +74,14 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
                         android:text="@string/admin_enter" />
+
+                <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btnAdminForgot"
+                        style="@style/Widget.MaterialComponents.Button.TextButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Забыли пароль администратора?"
+                        android:textAllCaps="false" />
 
                 </LinearLayout>
 

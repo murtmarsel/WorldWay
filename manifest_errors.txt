@@ -1,8 +1,0 @@
-﻿> Task :app:preBuild UP-TO-DATE
-> Task :app:preDebugBuild UP-TO-DATE
-> Task :app:generateDebugResValues UP-TO-DATE
-> Task :app:extractDeepLinksDebug UP-TO-DATE
-> Task :app:processDebugMainManifest
-
-BUILD SUCCESSFUL in 33s
-3 actionable tasks: 1 executed, 2 up-to-date

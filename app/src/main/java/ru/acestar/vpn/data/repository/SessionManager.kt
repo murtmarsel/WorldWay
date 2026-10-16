@@ -74,7 +74,7 @@ class SessionManager private constructor(
         sessionDao.updateCurrentSession(
             currentSession.userId, currentSession.email,
             currentSession.tariff, currentSession.subsEndDate,
-            currentSession.tokenExpiry, currentSession.isConfirmed,
+            currentSession.isConfirmed,
             currentSession.isActive, currentSession.isAdmin,
             currentSession.isNew, currentSession.usedTrafficBytes,
             currentSession.trafficLimit
@@ -188,6 +188,9 @@ class SessionManager private constructor(
         return _currentUser.value != null
     }
 
+    suspend fun replaceTokenIfCurrent(previousToken: String, newToken: String, expiry: Long): Boolean =
+        sessionDao.replaceCurrentToken(previousToken, newToken, expiry) > 0
+
     suspend fun updateToken(newToken: String, expiry: Long) {
         sessionDao.updateCurrentToken(newToken, expiry)
     }
@@ -225,3 +228,4 @@ class SessionManager private constructor(
         _currentUser.value = user
     }
 }
+

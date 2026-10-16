@@ -19,9 +19,6 @@ import ru.acestar.vpn.VpnApplication
 import ru.acestar.vpn.api.AuthApiService
 import ru.acestar.vpn.data.repository.SessionManager
 import ru.acestar.vpn.data.repository.UserRepository
-import ru.acestar.vpn.data.dao.VpnServerConfigDao
-import ru.acestar.vpn.data.database.AppDatabase
-import ru.acestar.vpn.data.model.VpnServerConfigEntity
 import ru.acestar.vpn.utils.PasswordHasher
 import ru.acestar.vpn.databinding.ActivityRegisterBinding
 
@@ -29,13 +26,13 @@ class RegisterActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityRegisterBinding
     private val sessionManager by lazy { SessionManager.getInstance(this) }
-    private val authApiService = AuthApiService(sessionManager)
+    private val authApiService by lazy { AuthApiService(sessionManager) }
     private val userRepository by lazy {
         UserRepository((application as VpnApplication).database.userDao())
     }
-    private lateinit var vpnServerConfigDao: VpnServerConfigDao
     private val viewModel: AuthViewModel by viewModels()
     private var pendingEmail: String = ""
+    private var verificationToken: String = ""
     private var pendingPassword: String = ""
     private var pendingConfirmPassword: String = ""
     private var pendingCreateDate: Date = Date()
@@ -54,7 +51,7 @@ class RegisterActivity : AppCompatActivity() {
                 registrationJob?.join()
                 if (registrationSucceeded) {
                     viewModel.login(pendingEmail, pendingPassword)
-                    navigateToMain()
+
                 } else {
                     showErrorDialog(registrationErrorMessage ?: "Ошибка регистрации")
                 }
@@ -68,6 +65,11 @@ class RegisterActivity : AppCompatActivity() {
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == RESULT_OK) {
+            verificationToken = result.data?.getStringExtra("verification_token").orEmpty()
+            if (verificationToken.isBlank()) {
+                showErrorDialog("Не получено подтверждение email. Повторите проверку.")
+                return@registerForActivityResult
+            }
             registrationJob = lifecycleScope.launch {
                 registrationSucceeded = false
                 registrationErrorMessage = null
@@ -76,7 +78,7 @@ class RegisterActivity : AppCompatActivity() {
                     password = pendingPassword,
                     createDate = pendingCreateDate,
                 )
-                getClientFilesList(pendingEmail)
+
             }
 
             agreementLauncher.launch(LegalDocumentActivity.agreementIntent(this))
@@ -93,8 +95,7 @@ class RegisterActivity : AppCompatActivity() {
         
         binding = ActivityRegisterBinding.inflate(layoutInflater)
         setContentView(binding.root)
-
-        vpnServerConfigDao = AppDatabase.getDatabase(applicationContext).vpnServerConfigDao()
+        AuthKeyboardMotion.attach(binding.authScroll, binding.ivLogo, binding.tvTitle, binding.cardRegister, binding.btnRegister)
         
         setupUI()
         observeViewModel()
@@ -105,49 +106,6 @@ class RegisterActivity : AppCompatActivity() {
             putExtra("email", pendingEmail)
         })
     }
-    suspend fun getClientFilesList(email: String) {
-        val result = authApiService.getClientFilesList(email, sessionManager.getAccessToken())
-        val userId = sessionManager.getUserId()
-
-        result.onSuccess { filesList ->
-            if (filesList.isEmpty()) {
-//                Log.d("ClientFiles", "Список файлов пуст")
-                return@onSuccess
-            }
-
-            // Записываем каждый файл в базу данных
-            filesList.forEach { file ->
-                try {
-                    // Создаем entity для базы данных
-                    val configEntity = VpnServerConfigEntity(
-                        userId = userId,
-                        name = file.name,
-                        type = file.type,
-                        category = file.category!!,
-                        protocol = file.protocol!!,
-                        content = file.content
-                    )
-
-                    // Вставляем в базу данных
-                    vpnServerConfigDao.insert(configEntity)
-
-//                    Log.d("ClientFiles", "Файл сохранен: ${file.name}")
-                } catch (e: Exception) {
-//                    Log.e("ClientFiles", "Ошибка сохранения файла ${file.name}: ${e.message}")
-                    // Можно продолжить с остальными файлами
-                }
-            }
-
-            // Показываем успешное завершение
-//            showSuccess("Загружено ${filesList.size} файлов")
-            showErrorDialog("Успешное получение файлов")
-
-        }.onFailure { exception ->
-//            Log.e("ClientFiles", "Ошибка получения данных: ${exception.message}")
-            showErrorDialog("Ошибка получения данных: ${exception.message}")
-        }
-
-    }
     private suspend fun create_client(
         email: String,
         password: String,
@@ -157,7 +115,8 @@ class RegisterActivity : AppCompatActivity() {
             val result = authApiService.createUser(
                 email = email,
                 password = password,
-                createDate = createDate as SqlDate
+                createDate = SqlDate(createDate.time),
+                verificationToken = verificationToken
             )
 
             result.onSuccess { authData ->
@@ -266,6 +225,7 @@ class RegisterActivity : AppCompatActivity() {
                     is AuthState.Success -> {
                         binding.progressBar.visibility = View.GONE
                         navigateToMain()
+    
                     }
                     is AuthState.Error -> {
                         binding.progressBar.visibility = View.GONE
@@ -296,3 +256,6 @@ class RegisterActivity : AppCompatActivity() {
             .show()
     }
 }
+
+
+

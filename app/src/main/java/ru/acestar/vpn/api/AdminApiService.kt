@@ -24,7 +24,7 @@ class AdminApiService(private val sessionManager: SessionManager) {
         .build()
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-    private val baseUrl = "http://94.249.239.35:5001"
+    private val baseUrl = "https://usavpn.duckdns.org"
 
     private suspend fun getToken(): String? = sessionManager.getAccessToken()
 
@@ -442,3 +442,4 @@ class AdminApiService(private val sessionManager: SessionManager) {
             } catch (e: Exception) { Result.failure(e) }
         }
 }
+

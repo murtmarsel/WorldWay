@@ -27,6 +27,9 @@ interface VpnConfigDao {
     @Query("DELETE FROM vpn_configs WHERE id = :id AND userId = :userId AND source = 'manual'")
     suspend fun deleteManualById(id: Long, userId: Long)
 
+    @Query("DELETE FROM vpn_configs WHERE userId = :userId AND source = :source")
+    suspend fun deleteBySource(userId: Long, source: String)
+
     @Query("UPDATE vpn_configs SET isFavorite = :favorite WHERE id = :id AND userId = :userId")
     suspend fun setFavorite(id: Long, userId: Long, favorite: Boolean)
 

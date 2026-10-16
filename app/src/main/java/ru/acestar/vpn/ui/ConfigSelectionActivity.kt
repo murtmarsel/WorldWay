@@ -92,7 +92,7 @@ class ConfigSelectionActivity : AppCompatActivity() {
     // ─── UI ───────────────────────────────────────────────────────────────────
 
     private fun setupUi() {
-        binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+        binding.toolbar.setNavigationIcon(ru.acestar.vpn.R.drawable.ic_arrow_back_white)
         binding.toolbar.setNavigationOnClickListener { finish() }
         binding.btnAddConfig.setOnClickListener { configFilePicker.launch("*/*") }
 
@@ -103,9 +103,11 @@ class ConfigSelectionActivity : AppCompatActivity() {
     }
 
     /**
-     * Синхронизация пользовательских конфигов с сервером.
-     * ВАЖНО: серверные конфиги (для кнопок Авто) НЕ скачиваем — они пересоздаются
-     * каждый раз. Только отправляем локальные manual-конфиги, которых нет на сервере.
+     * Синхронизация ПОЛЬЗОВАТЕЛЬСКИХ конфигов с сервером (двусторонняя):
+     *  1. Отправляем локальные (manual) конфиги на сервер — те, которых там ещё нет.
+     *  2. Скачиваем конфиги, которые пользователь сам добавил (через configs/upload),
+     *     и добавляем недостающие локально (source = "server").
+     * Серверные (авто) конфиги здесь НЕ трогаем — они не относятся к этому списку.
      */
     private fun syncConfigsWithServer() {
         binding.swipeRefreshConfigs.isRefreshing = true
@@ -116,9 +118,9 @@ class ConfigSelectionActivity : AppCompatActivity() {
                     binding.swipeRefreshConfigs.isRefreshing = false
                     return@launch
                 }
+                val token = sessionManager.getAccessToken()
 
-                // Отправляем только пользовательские (manual) конфиги на сервер.
-                // Серверные конфиги для Авто-режима НЕ трогаем.
+                // 1. Отправляем локальные (manual) конфиги на сервер.
                 val snapshot = configDao.getAllByUser(currentUserId)
                 snapshot.filter { it.source == "manual" }.forEach { cfg ->
                     // При ошибке отправки — игнорируем, ничего не делаем
@@ -129,6 +131,54 @@ class ConfigSelectionActivity : AppCompatActivity() {
                         serverHost = cfg.serverHost
                     )
                 }
+
+                // 2. Скачиваем только пользовательские конфиги (не серверные/авто).
+                if (token != null) {
+                    authApiService.getUserUploadedConfigs(user.email, token).onSuccess { configs ->
+                        // Свежая замена ранее скачанных пользовательских конфигов
+                        configDao.deleteBySource(currentUserId, "server")
+
+                        // Не дублируем то, что уже сохранено вручную на этом устройстве
+                        val manualContents = configDao.getAllByUser(currentUserId)
+                            .filter { it.source == "manual" }
+                            .map { it.configContent.trim() }
+                            .toHashSet()
+                        val added = HashSet<String>()
+
+                        configs.forEach { cfg ->
+                            val content = cfg.content.trim()
+                            if (content.isBlank()) return@forEach
+                            if (manualContents.contains(content) || !added.add(content)) {
+                                return@forEach
+                            }
+
+                            val typeString = when (cfg.type.lowercase()) {
+                                "wireguard", "amneziawg" -> "WireGuard"
+                                "openvpn"                -> "OpenVPN"
+                                else                     -> return@forEach
+                            }
+                            val host = cfg.serverHost.ifBlank {
+                                when (typeString) {
+                                    "OpenVPN"   -> extractOpenVpnServerHost(content)
+                                    "WireGuard" -> extractWireGuardEndpoint(content)
+                                    else        -> ""
+                                }
+                            }.ifBlank { "-" }
+
+                            configDao.insert(
+                                VpnConfigEntity(
+                                    userId        = currentUserId,
+                                    name          = cfg.name.ifBlank { host },
+                                    serverHost    = host,
+                                    configContent = content,
+                                    source        = "server",
+                                    type          = typeString
+                                )
+                            )
+                        }
+                    }
+                }
+
                 showToast(R.string.configs_synced)
             } catch (e: Exception) {
                 // Сеть недоступна — просто прячем индикатор

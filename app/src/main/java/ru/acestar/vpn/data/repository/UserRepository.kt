@@ -58,6 +58,7 @@ class UserRepository(private val userDao: UserDao) {
         val subscriptionEnd: Long? = authData.subsEndDate
         return if (existing != null) {
             val updated = existing.copy(
+                id = authData.id,
                 password = passwordHash,
                 username = username,
                 tariff = authData.tariff,
@@ -69,11 +70,12 @@ class UserRepository(private val userDao: UserDao) {
                 usedTrafficBytes = authData.usedTraffic,
                 trafficLimit = authData.trafficLimit
             )
-            userDao.update(updated)
+            userDao.saveServerUser(updated, existing.id)
             updated
         } else {
             val newUser = User(
                 email = email,
+                id = authData.id,
                 password = passwordHash,
                 username = username,
                 tariff = authData.tariff,
@@ -85,8 +87,8 @@ class UserRepository(private val userDao: UserDao) {
                 usedTrafficBytes = authData.usedTraffic,
                 trafficLimit = authData.trafficLimit
             )
-            val id = userDao.insert(newUser)
-            userDao.getUserById(id) ?: newUser.copy(id = id)
+            userDao.saveServerUser(newUser, null)
+            userDao.getUserById(newUser.id) ?: newUser
         }
     }
 
@@ -118,3 +120,7 @@ class UserRepository(private val userDao: UserDao) {
         userDao.updateSubscription(userId, newEndDate)
     }
 }
+
+
+
+

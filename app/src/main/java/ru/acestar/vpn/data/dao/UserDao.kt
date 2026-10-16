@@ -6,6 +6,37 @@ import ru.acestar.vpn.data.model.User
 
 @Dao
 interface UserDao {
+    @Query("UPDATE vpn_configs SET userId = :newId WHERE userId = :oldId")
+    suspend fun moveConfigs(oldId: Long, newId: Long)
+
+    @Query("UPDATE vpn_server_configs SET userId = :newId WHERE userId = :oldId")
+    suspend fun moveServerConfigs(oldId: Long, newId: Long)
+
+    @Query("UPDATE connection_stats SET userId = :newId WHERE userId = :oldId")
+    suspend fun moveStats(oldId: Long, newId: Long)
+
+    @Query("UPDATE sessions SET userId = :newId WHERE userId = :oldId")
+    suspend fun moveSessions(oldId: Long, newId: Long)
+
+    @Query("DELETE FROM users WHERE id = :oldId")
+    suspend fun deleteById(oldId: Long)
+
+    @Transaction
+    suspend fun saveServerUser(user: User, oldId: Long?) {
+        val target = getUserById(user.id)
+        check(target == null || target.email.equals(user.email, ignoreCase = true)) {
+            "Конфликт локального ID пользователя; требуется миграция учётных записей"
+        }
+        if (oldId != null && oldId != user.id) {
+            moveConfigs(oldId, user.id)
+            moveServerConfigs(oldId, user.id)
+            moveStats(oldId, user.id)
+            moveSessions(oldId, user.id)
+            deleteById(oldId)
+        }
+        insert(user)
+    }
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(user: User): Long
 
@@ -65,3 +96,5 @@ interface UserDao {
     @Query("UPDATE users SET isNew = :value WHERE id = :userId")
     suspend fun setIsNewUser(userId: Long, value: Boolean)
 }
+
+

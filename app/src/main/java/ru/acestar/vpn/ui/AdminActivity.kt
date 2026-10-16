@@ -57,6 +57,7 @@ class AdminActivity : AppCompatActivity() {
     private fun setupToolbar() {
         setSupportActionBar(binding.toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.setHomeAsUpIndicator(ru.acestar.vpn.R.drawable.ic_arrow_back_white)
         binding.toolbar.setNavigationOnClickListener { finish() }
     }
 
@@ -81,6 +82,10 @@ class AdminActivity : AppCompatActivity() {
             val pw = binding.etAdminPassword.text.toString()
             if (pw.isNotEmpty()) viewModel.adminLogin(pw)
             else showError("Введите пароль")
+        }
+
+        binding.btnAdminForgot.setOnClickListener {
+            PasswordRecoverySheet.newInstance(admin = true).show(supportFragmentManager, "admin_password_recovery")
         }
 
         binding.etSearchUser.addTextChangedListener(object : TextWatcher {

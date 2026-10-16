@@ -3,14 +3,18 @@ package ru.acestar.vpn.data.model
 
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
+import android.app.Application
+import org.json.JSONObject
+import ru.acestar.vpn.api.AuthApiService
+import ru.acestar.vpn.data.repository.SessionManager
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.regex.Pattern
 
-class EmailConfirmationViewModel : ViewModel() {
+class EmailConfirmationViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _emailState = MutableLiveData<EmailConfirmationState>(EmailConfirmationState.Idle)
     val emailState: LiveData<EmailConfirmationState> = _emailState
@@ -18,7 +22,9 @@ class EmailConfirmationViewModel : ViewModel() {
     private val _countdown = MutableLiveData<Int>()
     val countdown: LiveData<Int> = _countdown
 
-    private var generatedCode: String? = null
+    private val api = AuthApiService(SessionManager.getInstance(application))
+    var verificationToken: String = ""
+        private set
     private var countdownJob: Job? = null
 
     // Валидация email
@@ -46,19 +52,9 @@ class EmailConfirmationViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                // Генерируем 6-значный код
-                generatedCode = 111111.toString()
-
-                // TODO: Здесь отправка реального email через ваш API
-                // val response = apiService.sendConfirmationCode(email, generatedCode)
-
-                // Имитация отправки
-                delay(1500)
-
-                println("Код подтверждения для $email: $generatedCode")
-
+                api.emailRequest("email/send-code", JSONObject().put("email", email)).getOrThrow()
                 _emailState.value = EmailConfirmationState.CodeSent(email)
-                startCountdown(60) // 60 секунд на ввод кода
+                startCountdown(60) // Задержка перед повторной отправкой
 
             } catch (e: Exception) {
                 _emailState.value = EmailConfirmationState.Error("Ошибка отправки кода: ${e.message}")
@@ -77,17 +73,10 @@ class EmailConfirmationViewModel : ViewModel() {
 
         viewModelScope.launch {
             try {
-                delay(1000) // Имитация проверки
-
-                if (code == generatedCode) {
-                    // TODO: Отправить подтверждение на сервер
-                    // apiService.verifyEmail(email, code)
-
-                    _emailState.value = EmailConfirmationState.Verified(email)
-                    stopCountdown()
-                } else {
-                    _emailState.value = EmailConfirmationState.Error("Неверный код подтверждения")
-                }
+                val response = api.emailRequest("email/verify-code", JSONObject().put("email", email).put("code", code)).getOrThrow()
+                verificationToken = response.getString("verificationToken")
+                _emailState.value = EmailConfirmationState.Verified(email)
+                stopCountdown()
 
             } catch (e: Exception) {
                 _emailState.value = EmailConfirmationState.Error("Ошибка проверки кода: ${e.message}")
@@ -129,7 +118,7 @@ class EmailConfirmationViewModel : ViewModel() {
     fun resetState() {
         _emailState.value = EmailConfirmationState.Idle
         _countdown.value = 0
-        generatedCode = null
+        verificationToken = ""
         countdownJob?.cancel()
     }
 

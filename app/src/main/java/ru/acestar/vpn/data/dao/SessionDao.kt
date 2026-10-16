@@ -26,12 +26,12 @@ interface SessionDao {
 
     @Query("""UPDATE current_session
                         SET userId = :userId, email = :email, tariff = :tariff, subsEndDate = :subsEndDate,
-                            tokenExpiry = :tokenExpiry, isConfirmed = :isConfirmed, isActive = :isActive,
+                            isConfirmed = :isConfirmed, isActive = :isActive,
                             isAdmin = :isAdmin, isNew = :isNew,
                             usedTrafficBytes = :usedTrafficBytes, trafficLimit = :trafficLimit
-                        WHERE id = 1 """)
+                        WHERE id = 1 AND userId = :userId """)
     suspend fun updateCurrentSession(userId: Long, email: String, tariff: String, subsEndDate: Long,
-                                     tokenExpiry: Long, isConfirmed: Boolean, isActive: Boolean,
+                                     isConfirmed: Boolean, isActive: Boolean,
                                      isAdmin: Boolean, isNew: Boolean,
                                      usedTrafficBytes: Long, trafficLimit: Long)
 
@@ -72,6 +72,10 @@ interface SessionDao {
     @Query("DELETE FROM current_session")
     suspend fun clearCurrentSession()
 
+    @Query("UPDATE current_session SET token = :token, tokenExpiry = :expiry WHERE id = 1 AND token = :previousToken")
+    suspend fun replaceCurrentToken(previousToken: String, token: String, expiry: Long): Int
+
     @Query("UPDATE current_session SET token = :token, tokenExpiry = :expiry WHERE id = 1")
     suspend fun updateCurrentToken(token: String, expiry: Long)
 }
+

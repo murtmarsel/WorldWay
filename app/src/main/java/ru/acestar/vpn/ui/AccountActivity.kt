@@ -187,14 +187,18 @@ class AccountActivity : AppCompatActivity() {
             binding.tvTrafficUsed.text =
                 "${Tariff.formatUsed(usedBytes)} / ${Tariff.formatTrafficLimit(limit)}"
 
-            val progress = ((usedBytes.toFloat() / limit) * 100).toInt().coerceIn(0, 100)
-            binding.progressTraffic.progress = progress
+            // Доля использования с плавающей точкой. Прогресс-бар имеет max=10000,
+            // поэтому дробные проценты (напр. 45.73%) отображаются плавно, без округления до int.
+            val ratio = (usedBytes.toDouble() / limit).coerceIn(0.0, 1.0)
+            val percent = ratio * 100.0
+            binding.progressTraffic.max = 10000
+            binding.progressTraffic.progress = (ratio * 10000).toInt().coerceIn(0, 10000)
             binding.progressTraffic.progressTintList =
                 android.content.res.ColorStateList.valueOf(
                     ContextCompat.getColor(this, when {
-                        progress >= 90 -> R.color.error
-                        progress >= 70 -> R.color.connecting
-                        else           -> R.color.primary
+                        percent >= 90.0 -> R.color.error
+                        percent >= 70.0 -> R.color.connecting
+                        else            -> R.color.primary
                     })
                 )
 

@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:maxHeight="640dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
+
+        <!-- Заголовок + иконка обновления -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/admin_subscription"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:textColor="@color/text_primary"/>
+            <ImageView
+                android:id="@+id/ivRefresh"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:padding="4dp"
+                android:src="@drawable/ic_refresh"
+                app:tint="@color/text_secondary"/>
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvSubUserEmail"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textColor="@color/text_secondary"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Текущий тариф + статус -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            app:cardCornerRadius="12dp"
+            app:cardElevation="2dp"
+            android:layout_marginBottom="16dp">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+                    <TextView
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="@string/account_current_tariff"
+                        android:textColor="@color/text_secondary" android:textSize="14sp"/>
+                    <TextView
+                        android:id="@+id/tvSubTariff"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/primary" android:textSize="14sp"
+                        android:textStyle="bold" android:text="—"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+                    <TextView
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="@string/account_valid_until"
+                        android:textColor="@color/text_secondary" android:textSize="14sp"/>
+                    <TextView
+                        android:id="@+id/tvSubExpiry"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textColor="@color/text_primary" android:textSize="14sp"
+                        android:textStyle="bold" android:text="—"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+                    <TextView
+                        android:layout_width="0dp" android:layout_height="wrap_content"
+                        android:layout_weight="1" android:text="@string/sub_status_label"
+                        android:textColor="@color/text_secondary" android:textSize="14sp"/>
+                    <TextView
+                        android:id="@+id/tvSubStatus"
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:textSize="14sp" android:textStyle="bold" android:text="—"/>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- Продление -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/sub_extend_label"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.08"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="8dp">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnExtend30"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:layout_marginEnd="4dp"
+                android:text="@string/sub_extend_30" android:textAllCaps="false"
+                android:textSize="13sp" app:cornerRadius="8dp"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnExtend90"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:layout_marginHorizontal="4dp"
+                android:text="@string/sub_extend_90" android:textAllCaps="false"
+                android:textSize="13sp" app:cornerRadius="8dp"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnExtend365"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:layout_marginStart="4dp"
+                android:text="@string/sub_extend_365" android:textAllCaps="false"
+                android:textSize="13sp" app:cornerRadius="8dp"/>
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnExtendCustom"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent" android:layout_height="44dp"
+            android:text="@string/sub_extend_custom" android:textAllCaps="false"
+            android:textSize="13sp" app:cornerRadius="8dp"
+            android:layout_marginBottom="16dp"/>
+
+        <!-- Управление статусом -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/sub_control_label"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.08"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginBottom="16dp">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSubPause"
+                android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:layout_marginEnd="4dp"
+                android:text="@string/sub_pause" android:textAllCaps="false"
+                android:textSize="12sp" app:cornerRadius="8dp"
+                app:backgroundTint="@color/connecting"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSubResume"
+                android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:layout_marginHorizontal="4dp"
+                android:text="@string/sub_resume" android:textAllCaps="false"
+                android:textSize="12sp" app:cornerRadius="8dp"
+                app:backgroundTint="@color/connected"/>
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSubCancel"
+                android:layout_width="0dp" android:layout_height="44dp"
+                android:layout_weight="1" android:layout_marginStart="4dp"
+                android:text="@string/sub_cancel" android:textAllCaps="false"
+                android:textSize="12sp" app:cornerRadius="8dp"
+                app:backgroundTint="@color/error"/>
+        </LinearLayout>
+
+        <!-- История оплат -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/account_payments_history"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp"
+            android:textAllCaps="true"
+            android:letterSpacing="0.08"
+            android:layout_marginBottom="8dp"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:paddingHorizontal="4dp"
+            android:paddingBottom="6dp">
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="2.2" android:text="@string/payments_col_date"
+                android:textSize="11sp" android:textColor="@color/text_secondary"
+                android:textAllCaps="true"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="2.5" android:text="@string/payments_col_tariff"
+                android:textSize="11sp" android:textColor="@color/text_secondary"
+                android:textAllCaps="true"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1.8" android:text="@string/payments_col_amount"
+                android:textSize="11sp" android:textColor="@color/text_secondary"
+                android:textAllCaps="true" android:gravity="end"/>
+            <TextView android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1.5" android:text="@string/payments_col_status"
+                android:textSize="11sp" android:textColor="@color/text_secondary"
+                android:textAllCaps="true" android:gravity="end"/>
+        </LinearLayout>
+
+        <View android:layout_width="match_parent" android:layout_height="1dp"
+            android:background="@color/divider"/>
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvSubPayments"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:nestedScrollingEnabled="false"/>
+
+        <TextView
+            android:id="@+id/tvSubPaymentsEmpty"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/account_payments_empty"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:paddingVertical="16dp"
+            android:visibility="gone"/>
+
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

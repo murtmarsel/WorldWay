@@ -42,7 +42,7 @@ class LegalDocumentActivity : AppCompatActivity() {
     }
 
     private fun setupUi() {
-        binding.toolbar.setNavigationIcon(androidx.appcompat.R.drawable.abc_ic_ab_back_material)
+        binding.toolbar.setNavigationIcon(ru.acestar.vpn.R.drawable.ic_arrow_back_white)
         binding.toolbar.setNavigationOnClickListener { finish() }
 
         if (isAgreement) {

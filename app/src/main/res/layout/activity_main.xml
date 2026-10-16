@@ -97,7 +97,7 @@
         android:layout_width="200dp"
         android:layout_height="140dp"
         android:layout_marginTop="8dp"
-        android:contentDescription="VPN Icon"
+        android:contentDescription="App Icon"
         android:src="@mipmap/ic_vpn_gray_foreground"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
