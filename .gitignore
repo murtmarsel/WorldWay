@@ -27,3 +27,8 @@ local.properties
 *.zip
 hs_err_pid*
 replay_pid*
+
+.kotlin/
+__pycache__/
+*.pyc
+/app/release/
